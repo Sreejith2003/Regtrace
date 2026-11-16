@@ -218,3 +218,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# RegTrace
+# local virtual environment
+rag/
+# downloaded third-party documents (never commit)
+data/
+# local AI assistant instructions
+CLAUDE.md
