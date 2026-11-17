@@ -1,7 +1,10 @@
+import pymupdf
 from typer.testing import CliRunner
 
 from regtrace import __version__
 from regtrace.cli import app
+from regtrace.llm import LLMConnectionError
+from regtrace.tree import DocumentTree
 
 runner = CliRunner()
 
@@ -20,3 +23,76 @@ def test_config_command_shows_settings(monkeypatch):
 
     assert result.exit_code == 0
     assert "test-model:1b" in result.output
+
+
+class _FakeClient:
+    model = "fake-model"
+    host = "http://fake:11434"
+
+    def __init__(self, error=None):
+        self.error = error
+
+    def generate_structured(self, prompt, schema, *, system=None):
+        if self.error:
+            raise self.error
+        return schema(reply="Hello there!")
+
+
+def test_llm_check_reports_reply(monkeypatch):
+    monkeypatch.setattr("regtrace.cli.create_client", lambda: _FakeClient())
+
+    result = runner.invoke(app, ["llm-check"])
+
+    assert result.exit_code == 0
+    assert "OK" in result.output
+    assert "Hello there!" in result.output
+
+
+def test_llm_check_fails_cleanly_when_llm_unreachable(monkeypatch):
+    error = LLMConnectionError("Could not reach Ollama")
+    monkeypatch.setattr("regtrace.cli.create_client", lambda: _FakeClient(error))
+
+    result = runner.invoke(app, ["llm-check"])
+
+    assert result.exit_code == 1
+
+
+def _make_policy_pdf(path):
+    doc = pymupdf.open()
+    page = doc.new_page()
+    body = "This paragraph is ordinary body text that explains the section in detail."
+    y = 100
+    for text, size in [("Who we are", 16), (body, 11), ("Your rights", 16), (body, 11)]:
+        page.insert_text((72, y), text, fontsize=size)
+        y += size + 10
+    doc.save(path)
+    doc.close()
+    return path
+
+
+def test_build_index_prints_outline_and_saves_json(tmp_path):
+    pdf = _make_policy_pdf(tmp_path / "policy.pdf")
+    out = tmp_path / "policy.json"
+
+    result = runner.invoke(app, ["build-index", str(pdf), "--out", str(out)])
+
+    assert result.exit_code == 0
+    assert "Sections: 2" in result.output
+    assert "2  Your rights" in result.output
+    assert DocumentTree.load(out).get("1").title == "Who we are"
+
+
+def test_build_index_defaults_to_data_index_folder(tmp_path, monkeypatch):
+    pdf = _make_policy_pdf(tmp_path / "My Policy.pdf")
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["build-index", str(pdf)])
+
+    assert result.exit_code == 0
+    assert (tmp_path / "data" / "index" / "my-policy.json").is_file()
+
+
+def test_build_index_rejects_missing_file(tmp_path):
+    result = runner.invoke(app, ["build-index", str(tmp_path / "missing.pdf")])
+
+    assert result.exit_code != 0

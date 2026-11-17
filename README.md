@@ -77,6 +77,7 @@ copy .env.example .env
 # Check the setup
 regtrace --version
 regtrace config
+regtrace llm-check   # sends one small prompt to Ollama
 ```
 
 On macOS/Linux, activate with `source rag/bin/activate` and use `cp` instead of
