@@ -8,7 +8,8 @@ RegTrace checks a company's policy documents against a regulation and reports
 where the policy falls short: which obligation, what the policy says (quoted
 verbatim), whether it is compliant, and how to fix it.
 
-> **Status:** early development. Only setup and configuration work so far.
+> **Status:** early development (Phase 1). PDFs can be parsed into section
+> trees with LLM summaries; compliance checking is not built yet.
 
 > **Disclaimer:** RegTrace is meant to assist compliance analysts. It is **not
 > legal advice**, and its output must be reviewed by a qualified person.
@@ -46,6 +47,9 @@ All models run locally through [Ollama](https://ollama.com) (default:
 
 - [x] Project setup (packaging, CI, design notes)
 - [ ] Parse documents into section trees
+  - [x] Tree model, LLM client, PDF parser (bookmarks / font sizes)
+  - [x] Bottom-up LLM summaries per section (`build-index --summarize`)
+  - [ ] Design note for summaries (ADR 0004)
 - [ ] GDPR Articles 12–14 obligations pack
 - [ ] Evidence finding and compliance judgment
 - [ ] Quote verification
@@ -83,6 +87,56 @@ regtrace llm-check   # sends one small prompt to Ollama
 On macOS/Linux, activate with `source rag/bin/activate` and use `cp` instead of
 `copy`.
 
+## Usage
+
+### Sample policies
+
+`scripts/make_sample_policies.py` generates three fictional privacy policies
+with deliberately missing GDPR Art. 13 information ("planted gaps"), plus
+`planted_gaps.json` listing what is missing in each:
+
+```powershell
+python scripts\make_sample_policies.py     # writes to data\samples\
+```
+
+### Build an index
+
+`build-index` parses a PDF into a section tree, prints its outline and saves
+it as JSON (default: `data\index\<doc>.json`):
+
+```powershell
+regtrace build-index data\samples\brightleaf-coffee.pdf
+regtrace build-index data\samples\brightleaf-coffee.pdf --summarize
+```
+
+| Option | Meaning |
+|---|---|
+| `--out`, `-o` | Where to write the JSON index |
+| `--strategy` | How to find headings: `auto` (default), `bookmarks`, `fonts` |
+| `--summarize` | Add a short LLM summary to every section (needs Ollama running) |
+
+Summaries are built **bottom-up**: each section is summarized from its own
+text plus its subsections' summaries, ending with the whole document. They
+describe what a section covers, never whether it is compliant, and are what
+the evidence finder will read to decide which section to open. Example
+output:
+
+```text
+Summarizing with qwen2.5:7b ...
+  [1/12] 1.1 1.1 How to contact us
+  ...
+  [12/12] (document)
+Summarized 12, skipped 0 empty, failed 0 in 56.4s
+
+1  1. Who we are: Covers Brightleaf Coffee Roasters' contact details and information about the data protection officer.
+  1.1  1.1 How to contact us: Contact details for inquiries about the privacy policy and data handling.
+  ...
+```
+
+Empty headings are skipped. If one section's LLM call fails, it is left
+without a summary and the run continues. If Ollama cannot be reached, the
+command exits with code 1 and saves nothing.
+
 ## Development
 
 ```powershell
@@ -108,6 +162,27 @@ These will be measured and expanded as the project matures:
   slower than a single vector lookup.
 - Designed for analysing a few long documents in depth, not for searching
   thousands of documents.
+- Indexing with `--summarize` makes one LLM call per section (about 1 minute
+  for a 2-page policy with `qwen2.5:7b` on a laptop).
+- PDFs whose headings are neither bookmarked nor in a larger font (such as
+  the official GDPR text) are not split into sections yet.
+
+## Changelog
+
+Newest first. Dates are YYYY-MM-DD.
+
+### Unreleased
+- **Added:** bottom-up LLM node summaries (`regtrace.tree.summarize`) and the
+  `build-index --summarize` option, with progress, timing and failure counts.
+
+### 2026-11-17
+- **Added:** section tree model, Ollama LLM client with structured output and
+  retries (ADR 0003), PDF parser using bookmarks or font sizes, `llm-check`
+  and `build-index` commands, sample policy generator with planted gaps.
+
+### 2026-11-16
+- **Added:** project setup: packaging, settings from `.env`, `config`
+  command, CI (pytest + ruff), ADRs 0001–0002.
 
 ## License
 

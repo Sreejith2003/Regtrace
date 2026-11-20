@@ -11,8 +11,9 @@ from pydantic import BaseModel
 
 from regtrace import __version__
 from regtrace.config import load_settings
-from regtrace.llm import LLMError, create_client
+from regtrace.llm import LLMConnectionError, LLMError, create_client
 from regtrace.parsing import parse_pdf
+from regtrace.tree import DocumentTree, Node, summarize_tree
 
 DEFAULT_INDEX_DIR = Path("data") / "index"
 
@@ -91,6 +92,9 @@ def build_index(
         None, "--out", "-o", help="Where to write the JSON index [default: data/index/<doc>.json]."
     ),
     strategy: HeadingStrategy = typer.Option(HeadingStrategy.auto, help="How to find headings."),
+    summarize: bool = typer.Option(
+        False, "--summarize/--no-summarize", help="Add an LLM summary to every section."
+    ),
 ) -> None:
     """Parse a PDF into a section tree, print its outline and save it as JSON."""
     try:
@@ -104,12 +108,41 @@ def build_index(
     typer.echo(f"Pages:    {tree.root.page_end}")
     typer.echo(f"Sections: {sections}")
     typer.echo("")
+
+    if summarize:
+        _summarize(tree)
     typer.echo(tree.outline() if sections else "(no headings found; all text is in the root)")
 
     out = out or DEFAULT_INDEX_DIR / f"{tree.doc_id}.json"
     tree.save(out)
     typer.echo("")
     typer.secho(f"Saved index to {out}", fg=typer.colors.GREEN)
+
+
+def _summarize(tree: DocumentTree) -> None:
+    """Run the summarizer with progress output; exit with code 1 if the LLM is unreachable."""
+    client = create_client()
+    typer.echo(f"Summarizing with {client.model} ...")
+
+    def progress(done: int, total: int, node: Node) -> None:
+        label = "(document)" if node is tree.root else f"{node.id} {node.title}"
+        typer.echo(f"  [{done}/{total}] {label}")
+
+    start = time.perf_counter()
+    try:
+        stats = summarize_tree(tree, client, on_progress=progress)
+    except LLMConnectionError as exc:
+        typer.secho(f"FAILED: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+    elapsed = time.perf_counter() - start
+
+    typer.echo(
+        f"Summarized {stats.summarized}, skipped {stats.skipped} empty, "
+        f"failed {len(stats.failed)} in {elapsed:.1f}s"
+    )
+    if stats.failed:
+        typer.secho(f"No summary for: {', '.join(stats.failed)}", fg=typer.colors.YELLOW)
+    typer.echo("")
 
 
 if __name__ == "__main__":

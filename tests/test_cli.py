@@ -92,6 +92,49 @@ def test_build_index_defaults_to_data_index_folder(tmp_path, monkeypatch):
     assert (tmp_path / "data" / "index" / "my-policy.json").is_file()
 
 
+class _SummaryClient:
+    model = "fake-model"
+
+    def generate_structured(self, prompt, schema, *, system=None):
+        return schema(summary="Fake summary.")
+
+
+def test_build_index_summarize_adds_summaries(tmp_path, monkeypatch):
+    monkeypatch.setattr("regtrace.cli.create_client", lambda: _SummaryClient())
+    pdf = _make_policy_pdf(tmp_path / "policy.pdf")
+    out = tmp_path / "policy.json"
+
+    result = runner.invoke(app, ["build-index", str(pdf), "--out", str(out), "--summarize"])
+
+    assert result.exit_code == 0
+    assert "2  Your rights: Fake summary." in result.output
+    assert DocumentTree.load(out).get("1").summary == "Fake summary."
+
+
+def test_build_index_without_summarize_makes_no_llm_calls(tmp_path, monkeypatch):
+    def fail():
+        raise AssertionError("LLM client should not be created")
+
+    monkeypatch.setattr("regtrace.cli.create_client", fail)
+    pdf = _make_policy_pdf(tmp_path / "policy.pdf")
+
+    result = runner.invoke(app, ["build-index", str(pdf), "--out", str(tmp_path / "p.json")])
+
+    assert result.exit_code == 0
+
+
+def test_build_index_summarize_fails_cleanly_when_llm_unreachable(tmp_path, monkeypatch):
+    error = LLMConnectionError("Could not reach Ollama")
+    monkeypatch.setattr("regtrace.cli.create_client", lambda: _FakeClient(error))
+    pdf = _make_policy_pdf(tmp_path / "policy.pdf")
+    out = tmp_path / "policy.json"
+
+    result = runner.invoke(app, ["build-index", str(pdf), "--out", str(out), "--summarize"])
+
+    assert result.exit_code == 1
+    assert not out.exists()
+
+
 def test_build_index_rejects_missing_file(tmp_path):
     result = runner.invoke(app, ["build-index", str(tmp_path / "missing.pdf")])
 
