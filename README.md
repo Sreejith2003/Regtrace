@@ -8,9 +8,10 @@ RegTrace checks a company's policy documents against a regulation and reports
 where the policy falls short: which obligation, what the policy says (quoted
 verbatim), whether it is compliant, and how to fix it.
 
-> **Status:** early development (Phase 1). Privacy policies (PDF, HTML or a
-> URL) and the GDPR text can be parsed into section trees with LLM summaries;
-> compliance checking is not built yet.
+> **Status:** early development (Phase 2 done). Privacy policies (PDF, HTML
+> or a URL) and the GDPR text can be parsed into section trees with LLM
+> summaries, and the GDPR Arts. 12–14 obligations pack is linked to the
+> regulation text. Compliance checking (Phase 3) is not built yet.
 
 > **Disclaimer:** RegTrace is meant to assist compliance analysts. It is **not
 > legal advice**, and its output must be reviewed by a qualified person.
@@ -52,8 +53,10 @@ All models run locally through [Ollama](https://ollama.com) (default:
   - [x] Legal-text parser: chapters, sections, articles, paragraphs (GDPR)
   - [x] HTML parser and `build-index <url>` for real web privacy policies
   - [x] Bottom-up LLM summaries per section (`build-index --summarize`)
-  - [ ] Design note for summaries (ADR 0004)
-- [ ] GDPR Articles 12–14 obligations pack
+  - [ ] Design note for summaries (ADR 0005)
+- [x] GDPR Articles 12–14 obligations pack
+  - [x] 19 obligations with conditions (`packs/gdpr/`, ADR 0004)
+  - [x] Art. 4 definitions and cross-references linked (`check-pack`)
 - [ ] Evidence finding and compliance judgment
 - [ ] Quote verification
 - [ ] Evaluation vs a chunked-RAG baseline
@@ -188,6 +191,51 @@ Empty headings are skipped. If one section's LLM call fails, it is left
 without a summary and the run continues. If Ollama cannot be reached, the
 command exits with code 1 and saves nothing.
 
+### GDPR obligations pack
+
+`packs\gdpr\` holds 19 obligations from GDPR Arts. 12–14 that a privacy
+policy can be checked against
+([ADR 0004](docs/decisions/0004-regulation-packs.md)). Each one names who has
+to do what, when, under which condition, and what evidence usually looks
+like:
+
+```yaml
+- id: gdpr-13-1-d-legitimate-interests
+  ref: "13(1)(d)"
+  title: Legitimate interests pursued
+  who: controller
+  what: Describe the legitimate interests pursued by the controller or by a third party.
+  when: At the time when personal data are obtained.
+  condition: Any processing is based on legitimate interests (Art. 6(1)(f)).
+  evidence: '"We rely on our legitimate interest in ..." naming the actual interest.'
+  related: ["14(2)(b)"]
+```
+
+`check-pack` links every obligation to the indexed GDPR text (index it first,
+see above). It finds the exact paragraph and point, the Art. 4 definitions used
+there and the articles it refers to. It exits with code 1 if anything is
+missing:
+
+```powershell
+regtrace check-pack                                          # packs\gdpr
+regtrace check-pack --show gdpr-13-1-d-legitimate-interests  # one obligation in full
+```
+
+```text
+Definitions: 27 from Article 4
+Obligations: 19 (9 conditional)
+
+ID                                   Ref       Node     If  Terms / cross-references
+gdpr-13-1-a-controller-identity      13(1)(a)  3.2.1.1      controller, representative
+gdpr-13-1-d-legitimate-interests     13(1)(d)  3.2.1.1  yes processing, controller, third party  -> Art. 6(1)(f)
+gdpr-13-2-f-automated-decisions      13(2)(f)  3.2.1.2  yes data subject, processing, profiling  -> Art. 22(1), 22(4)
+...
+OK: all 19 obligations linked
+```
+
+Conditional obligations (`If = yes`) only apply in some cases, for example
+when a DPO exists or data leave the EEA. They can end in the `depends` status.
+
 ## Development
 
 ```powershell
@@ -230,6 +278,9 @@ These will be measured and expanded as the project matures:
 Newest first. Dates are YYYY-MM-DD.
 
 ### 2026-11-24
+- **Added:** GDPR obligations pack (`packs/gdpr/`): 19 obligations from
+  Arts. 12–14, a loader and linker (`regtrace.regulations`) that attach Art. 4
+  definitions and cross-references, the `check-pack` command and ADR 0004.
 - **Added:** `scripts/download_policies.py` and `scripts/policies.yaml`: six
   real public privacy policies for evaluation (URLs only, pages stay local).
 - **Added:** HTML parser (`regtrace.parsing.html`). `build-index` now accepts
