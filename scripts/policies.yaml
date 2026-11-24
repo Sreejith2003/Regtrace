@@ -1,0 +1,23 @@
+# Real, public privacy policies used for evaluation.
+# Only URLs are committed; download_policies.py saves the pages to data/raw/policies/.
+# Pick EU/UK-facing services so GDPR Arts. 12-14 apply.
+
+policies:
+  - id: spotify
+    company: Spotify
+    url: https://www.spotify.com/uk/legal/privacy-policy/
+  - id: bbc
+    company: BBC
+    url: https://www.bbc.co.uk/usingthebbc/privacy-policy
+  - id: ikea-uk
+    company: IKEA UK
+    url: https://www.ikea.com/gb/en/customer-service/privacy-policy/
+  - id: duckduckgo
+    company: DuckDuckGo
+    url: https://duckduckgo.com/privacy
+  - id: proton
+    company: Proton
+    url: https://proton.me/legal/privacy
+  - id: mozilla-websites
+    company: Mozilla
+    url: https://www.mozilla.org/en-US/privacy/websites/

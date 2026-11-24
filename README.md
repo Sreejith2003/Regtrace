@@ -102,6 +102,20 @@ with deliberately missing GDPR Art. 13 information ("planted gaps"), plus
 python scripts\make_sample_policies.py     # writes to data\samples\
 ```
 
+### Real privacy policies
+
+`scripts/policies.yaml` lists public privacy policies of EU/UK-facing
+services (Spotify, BBC, IKEA UK, DuckDuckGo, Proton, Mozilla). Only the URLs
+are committed. The script saves the pages to `data\raw\policies\` with a
+`manifest.json` (URL, retrieval time, SHA-256), so you can tell when a policy
+has changed:
+
+```powershell
+python scripts\download_policies.py                 # all policies
+python scripts\download_policies.py --only spotify  # just one
+regtrace build-index data\raw\policies\spotify.html
+```
+
 ### Build an index
 
 `build-index` parses a PDF, an HTML file or a web page into a section tree,
@@ -216,6 +230,8 @@ These will be measured and expanded as the project matures:
 Newest first. Dates are YYYY-MM-DD.
 
 ### 2026-11-24
+- **Added:** `scripts/download_policies.py` and `scripts/policies.yaml`: six
+  real public privacy policies for evaluation (URLs only, pages stay local).
 - **Added:** HTML parser (`regtrace.parsing.html`). `build-index` now accepts
   `.html` files and `http(s)` URLs, plus a `--doc-id` option.
 - **Added:** `legal` heading strategy for EU legal texts. The GDPR is now
