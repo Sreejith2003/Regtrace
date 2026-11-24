@@ -15,9 +15,11 @@ from regtrace import __version__
 from regtrace.config import load_settings
 from regtrace.llm import LLMConnectionError, LLMError, create_client
 from regtrace.parsing import fetch_html, parse_html, parse_html_file, parse_pdf
+from regtrace.regulations import LinkedObligation, link_pack, load_pack
 from regtrace.tree import DocumentTree, Node, summarize_tree
 
 DEFAULT_INDEX_DIR = Path("data") / "index"
+DEFAULT_PACK = Path("packs") / "gdpr"
 
 app = typer.Typer(
     name="regtrace",
@@ -165,6 +167,82 @@ def _summarize(tree: DocumentTree) -> None:
     if stats.failed:
         typer.secho(f"No summary for: {', '.join(stats.failed)}", fg=typer.colors.YELLOW)
     typer.echo("")
+
+
+@app.command("check-pack")
+def check_pack(
+    pack_dir: Path = typer.Argument(DEFAULT_PACK, help="Regulation pack folder."),
+    regulation: Path | None = typer.Option(
+        None, "--regulation", "-r", help="Regulation index JSON [default: from pack.yaml]."
+    ),
+    show: str | None = typer.Option(None, "--show", help="Print one obligation in full."),
+) -> None:
+    """Validate a regulation pack and link its obligations to the regulation text."""
+    try:
+        pack = load_pack(pack_dir)
+        index = regulation or Path(pack.index)
+        tree = DocumentTree.load(index)
+    except (OSError, ValueError) as exc:
+        typer.secho(f"FAILED: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    result = link_pack(pack, tree)
+    if show:
+        linked = next((item for item in result.linked if item.obligation.id == show), None)
+        if linked is None:
+            typer.secho(f"FAILED: no linked obligation {show!r}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1)
+        _print_obligation(linked)
+        return
+
+    conditional = sum(1 for o in pack.obligations if o.conditional)
+    typer.echo(f"Pack:        {pack.name} (v{pack.version})")
+    typer.echo(f"Regulation:  {index}")
+    typer.echo(f"Definitions: {len(result.definitions)} from Article {pack.definitions_article}")
+    typer.echo(f"Obligations: {len(pack.obligations)} ({conditional} conditional)")
+    typer.echo("")
+    width = max((len(o.id) for o in pack.obligations), default=2)
+    typer.echo(f"{'ID':<{width}}  {'Ref':<9} {'Node':<8} {'If':<3} Terms / cross-references")
+    for item in result.linked:
+        o = item.obligation
+        terms = ", ".join(d.term for d in item.definitions) or "-"
+        refs = f"  -> Art. {', '.join(item.cross_refs)}" if item.cross_refs else ""
+        flag = "yes" if o.conditional else ""
+        typer.echo(f"{o.id:<{width}}  {o.ref:<9} {item.node_id:<8} {flag:<3} {terms}{refs}")
+
+    typer.echo("")
+    if result.errors:
+        for error in result.errors:
+            typer.secho(f"ERROR: {error}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    typer.secho(f"OK: all {len(result.linked)} obligations linked", fg=typer.colors.GREEN)
+
+
+def _print_obligation(item: LinkedObligation) -> None:
+    o = item.obligation
+    typer.echo(f"{o.id}  (Art. {o.ref}, node {item.node_id})")
+    typer.echo(f"{o.title}")
+    typer.echo("")
+    for label, value in [
+        ("Who", o.who),
+        ("What", o.what),
+        ("When", o.when),
+        ("Condition", o.condition or "none, always applies"),
+        ("Evidence", o.evidence or "-"),
+        ("Related", ", ".join(o.related) or "-"),
+    ]:
+        typer.echo(f"{label + ':':<11}{value}")
+    typer.echo("")
+    typer.echo("Regulation text:")
+    typer.echo(f"  {item.source_text}")
+    if item.definitions:
+        typer.echo("")
+        typer.echo("Definitions:")
+        for definition in item.definitions:
+            typer.echo(f"  Art. {definition.ref} {definition.text}")
+    if item.cross_refs:
+        typer.echo("")
+        typer.echo(f"Cross-references: Art. {', '.join(item.cross_refs)}")
 
 
 if __name__ == "__main__":

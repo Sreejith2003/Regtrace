@@ -5,7 +5,7 @@ from typer.testing import CliRunner
 from regtrace import __version__
 from regtrace.cli import app
 from regtrace.llm import LLMConnectionError
-from regtrace.tree import DocumentTree
+from regtrace.tree import DocumentTree, Node, assign_ids
 
 runner = CliRunner()
 
@@ -197,3 +197,82 @@ def test_build_index_fails_cleanly_when_url_unreachable(tmp_path, monkeypatch):
 
     assert result.exit_code == 1
     assert "FAILED" in result.output
+
+
+def _write_pack(folder, ref="13(1)(a)"):
+    folder.mkdir()
+    (folder / "pack.yaml").write_text(
+        "id: t\nname: Test pack\nregulation: GDPR\nindex: gdpr.json\ndefinitions_article: '4'\n",
+        encoding="utf-8",
+    )
+    (folder / "obligations.yaml").write_text(
+        "obligations:\n"
+        f"  - id: t-identity\n    ref: '{ref}'\n    title: Identity\n    who: controller\n"
+        "    what: State who the controller is.\n    when: At collection.\n",
+        encoding="utf-8",
+    )
+    return folder
+
+
+def _write_regulation(path):
+    root = Node(
+        title="GDPR",
+        children=[
+            Node(
+                title="Article 4 Definitions",
+                text="(7) ‘controller’ means the body which determines the purposes of processing;",
+            ),
+            Node(
+                title="Article 13 Information",
+                children=[Node(title="Article 13(1)", text="(a) the identity of the controller;")],
+            ),
+        ],
+    )
+    assign_ids(root)
+    DocumentTree(doc_id="gdpr", title="GDPR", source="g.pdf", source_type="pdf", root=root).save(
+        path
+    )
+    return path
+
+
+def test_check_pack_links_obligations(tmp_path):
+    folder = _write_pack(tmp_path / "pack")
+    regulation = _write_regulation(tmp_path / "gdpr.json")
+
+    result = runner.invoke(app, ["check-pack", str(folder), "-r", str(regulation)])
+
+    assert result.exit_code == 0
+    assert "Definitions: 1 from Article 4" in result.output
+    assert "t-identity  13(1)(a)  2.1" in result.output
+    assert "OK: all 1 obligations linked" in result.output
+
+
+def test_check_pack_show_prints_text_and_definitions(tmp_path):
+    folder = _write_pack(tmp_path / "pack")
+    regulation = _write_regulation(tmp_path / "gdpr.json")
+
+    result = runner.invoke(
+        app, ["check-pack", str(folder), "-r", str(regulation), "--show", "t-identity"]
+    )
+
+    assert result.exit_code == 0
+    assert "the identity of the controller;" in result.output
+    assert "Art. 4(7) ‘controller’ means" in result.output
+
+
+def test_check_pack_fails_on_unlinked_obligation(tmp_path):
+    folder = _write_pack(tmp_path / "pack", ref="13(2)(b)")
+    regulation = _write_regulation(tmp_path / "gdpr.json")
+
+    result = runner.invoke(app, ["check-pack", str(folder), "-r", str(regulation)])
+
+    assert result.exit_code == 1
+    assert "ERROR: t-identity: Article 13(2)(b) not found" in result.output
+
+
+def test_check_pack_fails_without_regulation_index(tmp_path):
+    folder = _write_pack(tmp_path / "pack")
+
+    result = runner.invoke(app, ["check-pack", str(folder), "-r", str(tmp_path / "none.json")])
+
+    assert result.exit_code == 1
