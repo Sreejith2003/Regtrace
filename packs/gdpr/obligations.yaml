@@ -1,0 +1,231 @@
+# GDPR transparency obligations that a website privacy policy can be checked against.
+#
+# ref        article(paragraph)(point) in the regulation index
+# who        party that must act
+# what       what the policy has to say, in plain words
+# when       timing the regulation sets
+# condition  only applies if this is true; otherwise the obligation always applies
+# evidence   what a passage that satisfies it typically looks like
+# related    parallel provisions with the same requirement
+
+obligations:
+  # --- Article 12: how the information is given ---
+
+  - id: gdpr-12-1-plain-language
+    ref: "12(1)"
+    title: Concise, transparent and plain language
+    who: controller
+    what: >-
+      Give the information in a concise, transparent, intelligible and easily accessible
+      form, using clear and plain language.
+    when: Whenever Art. 13 or 14 information is provided.
+    evidence: >-
+      Short, well-structured sections with headings, no unexplained legal jargon, the
+      policy reachable from every page.
+
+  - id: gdpr-12-1-children
+    ref: "12(1)"
+    title: Language suited to children
+    who: controller
+    what: >-
+      Use clear and plain language that a child can understand for information
+      addressed to children.
+    when: Whenever Art. 13 or 14 information is provided.
+    condition: The service is directed at or likely to be used by children.
+    evidence: A child-friendly summary or a separate section written for young users.
+
+  - id: gdpr-12-3-response-time
+    ref: "12(3)"
+    title: Time limit for answering rights requests
+    who: controller
+    what: >-
+      Answer requests from data subjects without undue delay and at the latest within one
+      month, extendable by two further months, telling the data subject about any
+      extension and the reasons.
+    when: After receiving a request under Arts. 15-22.
+    evidence: '"We will respond within one month", possibly mentioning an extension.'
+
+  - id: gdpr-12-5-free-of-charge
+    ref: "12(5)"
+    title: Information and rights free of charge
+    who: controller
+    what: >-
+      Provide the information and act on rights requests free of charge, except for
+      manifestly unfounded or excessive requests.
+    when: Always.
+    evidence: '"Exercising your rights is free of charge".'
+
+  # --- Article 13: data collected from the data subject ---
+
+  - id: gdpr-13-1-a-controller-identity
+    ref: "13(1)(a)"
+    title: Identity and contact details of the controller
+    who: controller
+    what: >-
+      State the identity and the contact details of the controller and, where applicable,
+      of the controller's representative.
+    when: At the time when personal data are obtained.
+    evidence: Legal company name with a postal address, email address or contact form.
+    related: ["14(1)(a)"]
+
+  - id: gdpr-13-1-b-dpo-contact
+    ref: "13(1)(b)"
+    title: Contact details of the data protection officer
+    who: controller
+    what: Give the contact details of the data protection officer.
+    when: At the time when personal data are obtained.
+    condition: The controller has appointed a data protection officer (Art. 37).
+    evidence: An email or postal address for the DPO.
+    related: ["14(1)(b)"]
+
+  - id: gdpr-13-1-c-purposes-legal-basis
+    ref: "13(1)(c)"
+    title: Purposes and legal basis of processing
+    who: controller
+    what: >-
+      State the purposes for which the personal data are processed and the legal basis
+      for each purpose.
+    when: At the time when personal data are obtained.
+    evidence: >-
+      A list or table linking each purpose to a legal basis (consent, contract, legal
+      obligation, legitimate interests, ...).
+    related: ["14(1)(c)"]
+
+  - id: gdpr-13-1-d-legitimate-interests
+    ref: "13(1)(d)"
+    title: Legitimate interests pursued
+    who: controller
+    what: Describe the legitimate interests pursued by the controller or by a third party.
+    when: At the time when personal data are obtained.
+    condition: Any processing is based on legitimate interests (Art. 6(1)(f)).
+    evidence: '"We rely on our legitimate interest in ..." naming the actual interest.'
+    related: ["14(2)(b)"]
+
+  - id: gdpr-13-1-e-recipients
+    ref: "13(1)(e)"
+    title: Recipients of the personal data
+    who: controller
+    what: Name the recipients or categories of recipients of the personal data, if any.
+    when: At the time when personal data are obtained.
+    evidence: >-
+      Categories such as payment providers, hosting providers, analytics or advertising
+      partners, authorities.
+    related: ["14(1)(e)"]
+
+  - id: gdpr-13-1-f-international-transfers
+    ref: "13(1)(f)"
+    title: Transfers to third countries and safeguards
+    who: controller
+    what: >-
+      Say that personal data are transferred to a third country or international
+      organisation, whether an adequacy decision exists, and otherwise which safeguards are
+      used and how to get a copy of them.
+    when: At the time when personal data are obtained.
+    condition: Personal data are transferred outside the EU/EEA.
+    evidence: >-
+      Mentions of transfers outside the EEA together with adequacy decisions, standard
+      contractual clauses or binding corporate rules.
+    related: ["14(1)(f)"]
+
+  - id: gdpr-13-2-a-retention
+    ref: "13(2)(a)"
+    title: Retention period
+    who: controller
+    what: >-
+      State how long the personal data will be stored or, if that is not possible, the
+      criteria used to decide the period.
+    when: At the time when personal data are obtained.
+    evidence: Concrete periods ("24 months after your last order") or clear criteria.
+    related: ["14(2)(a)"]
+
+  - id: gdpr-13-2-b-data-subject-rights
+    ref: "13(2)(b)"
+    title: Data subject rights
+    who: controller
+    what: >-
+      Explain the rights to request access, rectification, erasure, restriction of
+      processing, to object to processing and to data portability.
+    when: At the time when personal data are obtained.
+    evidence: Each right listed, with how to exercise it.
+    related: ["14(2)(c)"]
+
+  - id: gdpr-13-2-c-withdraw-consent
+    ref: "13(2)(c)"
+    title: Right to withdraw consent
+    who: controller
+    what: >-
+      Explain the right to withdraw consent at any time, without affecting the lawfulness
+      of processing before the withdrawal.
+    when: At the time when personal data are obtained.
+    condition: Any processing is based on consent (Art. 6(1)(a) or 9(2)(a)).
+    evidence: '"You can withdraw your consent at any time" plus how.'
+    related: ["14(2)(d)"]
+
+  - id: gdpr-13-2-d-complaint
+    ref: "13(2)(d)"
+    title: Right to complain to a supervisory authority
+    who: controller
+    what: Tell data subjects they can lodge a complaint with a supervisory authority.
+    when: At the time when personal data are obtained.
+    evidence: A mention of the data protection authority, ideally named and linked.
+    related: ["14(2)(e)"]
+
+  - id: gdpr-13-2-e-obligation-to-provide
+    ref: "13(2)(e)"
+    title: Whether providing data is required
+    who: controller
+    what: >-
+      Say whether providing the personal data is a statutory or contractual requirement or
+      needed to enter into a contract, whether the data subject must provide it, and what
+      happens if they do not.
+    when: At the time when personal data are obtained.
+    evidence: '"You must provide X to create an account; without it we cannot ..."'
+
+  - id: gdpr-13-2-f-automated-decisions
+    ref: "13(2)(f)"
+    title: Automated decision-making and profiling
+    who: controller
+    what: >-
+      Disclose automated decision-making, including profiling, with meaningful information
+      about the logic involved and its significance and envisaged consequences.
+    when: At the time when personal data are obtained.
+    condition: >-
+      The controller makes decisions based solely on automated processing that produce
+      legal or similarly significant effects (Art. 22(1) and (4)).
+    evidence: A section on automated decisions or profiling explaining how and why.
+    related: ["14(2)(g)"]
+
+  - id: gdpr-13-3-further-processing
+    ref: "13(3)"
+    title: Information before processing for a new purpose
+    who: controller
+    what: >-
+      Before using personal data for a purpose other than the one they were collected for,
+      inform the data subject about that other purpose and any relevant further
+      information.
+    when: Prior to the further processing.
+    condition: The controller intends to process data for a new purpose.
+    evidence: A commitment to notify users before using their data for new purposes.
+    related: ["14(4)"]
+
+  # --- Article 14: data not obtained from the data subject ---
+
+  - id: gdpr-14-1-d-data-categories
+    ref: "14(1)(d)"
+    title: Categories of personal data obtained from others
+    who: controller
+    what: State the categories of personal data concerned.
+    when: Within a reasonable period after obtaining the data, at the latest one month.
+    condition: The controller obtains personal data from third parties or public sources.
+    evidence: A list of data types received from partners, social networks or other sources.
+
+  - id: gdpr-14-2-f-data-source
+    ref: "14(2)(f)"
+    title: Source of the personal data
+    who: controller
+    what: >-
+      State from which source the personal data originate and, if applicable, whether they
+      came from publicly accessible sources.
+    when: Within a reasonable period after obtaining the data, at the latest one month.
+    condition: The controller obtains personal data from third parties or public sources.
+    evidence: Named sources such as "social login providers", "credit agencies", "partners".

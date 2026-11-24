@@ -1,0 +1,7 @@
+id: gdpr
+name: GDPR transparency obligations (Arts. 12-14)
+regulation: Regulation (EU) 2016/679 (General Data Protection Regulation)
+source_url: https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=CELEX:32016R0679
+index: data/index/gdpr.json
+definitions_article: "4"
+version: "0.1"
