@@ -123,13 +123,13 @@ output:
 
 ```text
 Summarizing with qwen2.5:7b ...
-  [1/12] 1.1 1.1 How to contact us
+  [1/12] 1.1 How to contact us
   ...
   [12/12] (document)
 Summarized 12, skipped 0 empty, failed 0 in 56.4s
 
 1  1. Who we are: Covers Brightleaf Coffee Roasters' contact details and information about the data protection officer.
-  1.1  1.1 How to contact us: Contact details for inquiries about the privacy policy and data handling.
+  1.1  How to contact us: Contact details for inquiries about the privacy policy and data handling.
   ...
 ```
 
@@ -174,6 +174,8 @@ Newest first. Dates are YYYY-MM-DD.
 ### Unreleased
 - **Added:** bottom-up LLM node summaries (`regtrace.tree.summarize`) and the
   `build-index --summarize` option, with progress, timing and failure counts.
+- **Fixed:** outlines no longer repeat a section number that is already part
+  of the heading (`1.1 1.1 How to contact us`).
 
 ### 2026-11-17
 - **Added:** section tree model, Ollama LLM client with structured output and

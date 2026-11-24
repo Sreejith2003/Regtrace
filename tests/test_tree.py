@@ -81,6 +81,18 @@ def test_outline_without_summaries_shows_full_tree(tree):
     ]
 
 
+def test_outline_does_not_repeat_number_already_in_title():
+    root = Node(
+        title="Policy",
+        children=[Node(title="1. Who we are", children=[Node(title="1.1 Contact us")])],
+    )
+    assign_ids(root)
+    tree = DocumentTree(doc_id="p", title="Policy", source="p.pdf", source_type="pdf", root=root)
+
+    assert tree.outline().splitlines() == ["1  Who we are", "  1.1  Contact us"]
+    assert tree.get("1").title == "1. Who we are"
+
+
 def test_save_and_load_round_trip(tree, tmp_path):
     path = tmp_path / "index" / "example.json"
 

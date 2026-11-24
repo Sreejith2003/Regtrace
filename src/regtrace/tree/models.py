@@ -37,6 +37,14 @@ class Node(BaseModel):
             raise ValueError("page_end must not be before page_start")
         return self
 
+    @property
+    def short_title(self) -> str:
+        """The title without a leading number that repeats the node id."""
+        for prefix in (f"{self.id}. ", f"{self.id} "):
+            if self.title.startswith(prefix):
+                return self.title[len(prefix) :]
+        return self.title
+
     def walk(self) -> Iterator[Node]:
         """Yield this node and all its descendants depth-first, in reading order."""
         yield self
@@ -103,7 +111,7 @@ class DocumentTree(BaseModel):
             if max_depth is not None and node.level > max_depth:
                 continue
             indent = "  " * (node.level - 1)
-            line = f"{indent}{node.id}  {node.title}"
+            line = f"{indent}{node.id}  {node.short_title}"
             if with_summaries and node.summary:
                 line += f": {node.summary}"
             lines.append(line)

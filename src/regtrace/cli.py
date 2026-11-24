@@ -125,7 +125,7 @@ def _summarize(tree: DocumentTree) -> None:
     typer.echo(f"Summarizing with {client.model} ...")
 
     def progress(done: int, total: int, node: Node) -> None:
-        label = "(document)" if node is tree.root else f"{node.id} {node.title}"
+        label = "(document)" if node is tree.root else f"{node.id} {node.short_title}"
         typer.echo(f"  [{done}/{total}] {label}")
 
     start = time.perf_counter()
