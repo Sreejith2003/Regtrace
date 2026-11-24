@@ -224,3 +224,114 @@ def test_non_pdf_file_is_rejected(tmp_path):
 
     with pytest.raises(ValueError, match="Not a PDF"):
         parse_pdf(path)
+
+
+# --- legal strategy ---
+
+
+@pytest.fixture
+def legal_pdf(tmp_path):
+    return make_pdf(
+        tmp_path / "regulation.pdf",
+        [
+            [
+                ("Whereas the recitals explain the purpose.", 10),
+                ("CHAPTER I", 10),
+                ("General provisions", 10),
+                ("Article 1", 10),
+                ("Subject-matter", 10),
+                ("1.", 10),
+                ("This Regulation lays down rules.", 10),
+                ("2.", 10),
+                ("It protects fundamental rights, see Article 2.", 10),
+                ("CHAPTER II", 10),
+                ("Rights of the data subject", 10),
+                ("Section 1", 10),
+                ("Transparency", 10),
+                ("Article 12", 10),
+                ("Transparent information", 10),
+                ("The controller shall take appropriate measures.", 10),
+                ("Article 13", 10),
+                ("Information to be provided", 10),
+                ("1.", 10),
+                ("The controller shall provide the following:", 10),
+                ("(a) the identity of the controller;", 10),
+            ]
+        ],
+    )
+
+
+def test_legal_structure_becomes_the_tree(legal_pdf):
+    tree = parse_pdf(legal_pdf, strategy="legal")
+
+    assert titles(tree) == [
+        ("1", "CHAPTER I General provisions"),
+        ("1.1", "Article 1 Subject-matter"),
+        ("1.1.1", "Article 1(1)"),
+        ("1.1.2", "Article 1(2)"),
+        ("2", "CHAPTER II Rights of the data subject"),
+        ("2.1", "Section 1 Transparency"),
+        ("2.1.1", "Article 12 Transparent information"),
+        ("2.1.2", "Article 13 Information to be provided"),
+        ("2.1.2.1", "Article 13(1)"),
+    ]
+
+
+def test_legal_text_goes_to_paragraphs_and_preamble_to_root(legal_pdf):
+    tree = parse_pdf(legal_pdf, strategy="legal")
+
+    assert tree.root.text == "Whereas the recitals explain the purpose."
+    assert tree.get("1.1.2").text == "It protects fundamental rights, see Article 2."
+    assert tree.get("2.1.1").text == "The controller shall take appropriate measures."
+    assert "(a) the identity of the controller;" in tree.get("2.1.2.1").text
+
+
+def test_auto_detects_legal_structure(legal_pdf):
+    assert titles(parse_pdf(legal_pdf))[0] == ("1", "CHAPTER I General provisions")
+
+
+def test_auto_needs_several_articles_for_legal(tmp_path):
+    path = make_pdf(
+        tmp_path / "policy.pdf",
+        [[("Intro", 16), ("Article 6", 11), ("Lawful basis", 11), ("Details", 16), (BODY, 11)]],
+    )
+
+    assert titles(parse_pdf(path)) == [("1", "Intro"), ("2", "Details")]
+
+
+def test_article_number_without_title_is_not_a_heading(tmp_path):
+    path = make_pdf(
+        tmp_path / "no_title.pdf",
+        [[("Article 5", 10), ("1.", 10), ("Personal data shall be processed lawfully.", 10)]],
+    )
+
+    tree = parse_pdf(path, strategy="legal")
+
+    assert tree.root.children == []
+    assert "Article 5" in tree.root.text
+
+
+def test_wrapped_article_title_is_joined(tmp_path):
+    path = make_pdf(
+        tmp_path / "wrapped.pdf",
+        [
+            [
+                ("Article 12", 10, 100),
+                ("Transparent information and modalities for the rights of the data", 10, 120),
+                ("subject", 10, 131),
+                ("1.", 10, 160),
+                ("The controller shall take appropriate measures.", 10, 180),
+            ]
+        ],
+    )
+
+    tree = parse_pdf(path, strategy="legal")
+
+    assert titles(tree) == [
+        (
+            "1",
+            "Article 12 Transparent information and modalities for the rights of the data subject",
+        ),
+        ("1.1", "Article 12(1)"),
+    ]
+    assert tree.get("1").text == ""

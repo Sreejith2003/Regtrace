@@ -82,6 +82,7 @@ def llm_check() -> None:
 class HeadingStrategy(StrEnum):
     auto = "auto"
     bookmarks = "bookmarks"
+    legal = "legal"
     fonts = "fonts"
 
 

@@ -1,13 +1,16 @@
 """PDF → section tree.
 
-Headings are found with one of two strategies:
+Headings are found with one of three strategies:
 
 1. **bookmarks**: the PDF's own outline (table of contents), when it has one.
-2. **fonts**: lines set noticeably larger than the body text are headings; each
+2. **legal**: the chapter / section / article / paragraph layout of EU legal
+   texts such as the GDPR.
+3. **fonts**: lines set noticeably larger than the body text are headings; each
    distinct heading size becomes a level (largest = level 1).
 
-``strategy="auto"`` (the default) uses bookmarks when there are at least
-``MIN_AUTO_BOOKMARKS`` of them, fonts otherwise.
+``strategy="auto"`` (the default) tries them in that order: bookmarks when there
+are at least ``MIN_AUTO_BOOKMARKS``, legal when at least ``MIN_AUTO_ARTICLES``
+articles are found, fonts otherwise.
 Text between two headings belongs to the first one. Repeated page headers and
 footers (and page numbers) are removed first.
 """
@@ -25,7 +28,7 @@ import pymupdf
 
 from regtrace.tree import DocumentTree, Node, assign_ids
 
-Strategy = Literal["auto", "bookmarks", "fonts"]
+Strategy = Literal["auto", "bookmarks", "legal", "fonts"]
 
 # A line counts as a heading if it is at least this many points larger than body text...
 MIN_HEADING_SIZE_STEP = 1.0
@@ -37,8 +40,16 @@ MAX_HEADING_LEVELS = 4
 PAGE_MARGIN = 0.08
 # "auto" trusts bookmarks only if there are this many (one bookmark is just a title).
 MIN_AUTO_BOOKMARKS = 2
+MIN_AUTO_ARTICLES = 3
 
 _PAGE_NUMBER = re.compile(r"(page\s*)?\d+(\s*(of|/)\s*\d+)?", re.IGNORECASE)
+
+_LEGAL_LEVELS = [
+    (re.compile(r"CHAPTER [IVXLC]+"), 1),
+    (re.compile(r"Section \d+"), 2),
+    (re.compile(r"Article (\d+)"), 3),
+]
+_PARAGRAPH = re.compile(r"(\d+)\.")
 
 
 @dataclass(frozen=True)
@@ -95,11 +106,7 @@ def parse_pdf(
         if not doc.is_pdf:
             raise ValueError(f"Not a PDF file: {path}")
         lines = _remove_page_furniture(_extract_lines(doc), doc.page_count)
-        toc = doc.get_toc(simple=True)
-        use_bookmarks = strategy == "bookmarks" or (
-            strategy == "auto" and len(toc) >= MIN_AUTO_BOOKMARKS
-        )
-        headings = _bookmark_headings(toc, lines) if use_bookmarks else _font_headings(lines)
+        headings = _find_headings(lines, doc.get_toc(simple=True), strategy)
 
         metadata_title = _clean((doc.metadata or {}).get("title") or "")
         root = _build_tree(lines, headings, default_title=metadata_title or path.stem)
@@ -182,6 +189,17 @@ def _remove_page_furniture(lines: list[_Line], page_count: int) -> list[_Line]:
 # --- heading detection ----------------------------------------------------------
 
 
+def _find_headings(lines: list[_Line], toc: list[list], strategy: Strategy) -> list[_Heading]:
+    if strategy == "bookmarks" or (strategy == "auto" and len(toc) >= MIN_AUTO_BOOKMARKS):
+        return _bookmark_headings(toc, lines)
+    if strategy in ("legal", "auto"):
+        legal = _legal_headings(lines)
+        articles = sum(1 for h in legal if h.level == 3)
+        if strategy == "legal" or articles >= MIN_AUTO_ARTICLES:
+            return legal
+    return _font_headings(lines)
+
+
 def _bookmark_headings(toc: list[list], lines: list[_Line]) -> list[_Heading]:
     """Place each bookmark at the line that matches its title, or at the top of its page."""
     headings: list[_Heading] = []
@@ -205,6 +223,46 @@ def _bookmark_headings(toc: list[list], lines: list[_Line]) -> list[_Heading]:
             headings.append(_Heading(level, title, page, pos, pos))
             cursor = pos
     return headings
+
+
+def _legal_headings(lines: list[_Line]) -> list[_Heading]:
+    """A "CHAPTER I" / "Section 1" / "Article 13" line followed by its title block,
+    and "1." lines inside an article (paragraphs, titled "Article 13(1)")."""
+    headings: list[_Heading] = []
+    article = None
+    for k, line in enumerate(lines):
+        if article is not None and (match := _PARAGRAPH.fullmatch(line.text)):
+            headings.append(_Heading(4, f"Article {article}({match[1]})", line.page, k, k + 1))
+            continue
+        for pattern, level in _LEGAL_LEVELS:
+            match = pattern.fullmatch(line.text)
+            if match is None:
+                continue
+            if k + 1 == len(lines) or _is_legal_marker(lines[k + 1].text):
+                break
+            end = k + 2
+            while end < len(lines) and _continues(lines[end - 1], lines[end]):
+                end += 1
+            title = " ".join(lines[i].text for i in range(k, end))
+            headings.append(_Heading(level, title, line.page, k, end))
+            article = match[1] if level == 3 else None
+            break
+    return headings
+
+
+def _continues(prev: _Line, line: _Line) -> bool:
+    if line.block == prev.block:
+        return True
+    gap = line.y0 - prev.y1
+    return (
+        line.page == prev.page and gap < (prev.y1 - prev.y0) / 4 and not _is_legal_marker(line.text)
+    )
+
+
+def _is_legal_marker(text: str) -> bool:
+    return _PARAGRAPH.fullmatch(text) is not None or any(
+        pattern.fullmatch(text) for pattern, _ in _LEGAL_LEVELS
+    )
 
 
 def _font_headings(lines: list[_Line]) -> list[_Heading]:

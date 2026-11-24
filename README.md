@@ -8,8 +8,9 @@ RegTrace checks a company's policy documents against a regulation and reports
 where the policy falls short: which obligation, what the policy says (quoted
 verbatim), whether it is compliant, and how to fix it.
 
-> **Status:** early development (Phase 1). PDFs can be parsed into section
-> trees with LLM summaries; compliance checking is not built yet.
+> **Status:** early development (Phase 1). Privacy policies and the GDPR text
+> can be parsed into section trees with LLM summaries; compliance checking is
+> not built yet.
 
 > **Disclaimer:** RegTrace is meant to assist compliance analysts. It is **not
 > legal advice**, and its output must be reviewed by a qualified person.
@@ -48,6 +49,7 @@ All models run locally through [Ollama](https://ollama.com) (default:
 - [x] Project setup (packaging, CI, design notes)
 - [ ] Parse documents into section trees
   - [x] Tree model, LLM client, PDF parser (bookmarks / font sizes)
+  - [x] Legal-text parser: chapters, sections, articles, paragraphs (GDPR)
   - [x] Bottom-up LLM summaries per section (`build-index --summarize`)
   - [ ] Design note for summaries (ADR 0004)
 - [ ] GDPR Articles 12–14 obligations pack
@@ -112,8 +114,35 @@ regtrace build-index data\samples\brightleaf-coffee.pdf --summarize
 | Option | Meaning |
 |---|---|
 | `--out`, `-o` | Where to write the JSON index |
-| `--strategy` | How to find headings: `auto` (default), `bookmarks`, `fonts` |
+| `--strategy` | How to find headings: `auto` (default), `bookmarks`, `legal`, `fonts` |
 | `--summarize` | Add a short LLM summary to every section (needs Ollama running) |
+
+`auto` uses the PDF's bookmarks if it has any, then the `legal` layout if it
+finds at least three `Article N` headings, and font sizes otherwise.
+
+### Index the GDPR
+
+Download the official GDPR PDF from
+[EUR-Lex](https://eur-lex.europa.eu/legal-content/EN/TXT/PDF/?uri=CELEX:32016R0679)
+and save it as `data\raw\gdpr.pdf`, then:
+
+```powershell
+regtrace build-index data\raw\gdpr.pdf
+```
+
+The `legal` strategy finds `CHAPTER I`, `Section 1`, `Article 13` and numbered
+paragraphs (`1.`, `2.`), each with its title. The recitals stay in the root.
+Lettered points like `(a)` stay inside their paragraph's text:
+
+```text
+3  CHAPTER III Rights of the data subject
+  3.1  Section 1 Transparency and modalities
+    3.1.1  Article 12 Transparent information, communication and modalities for the exercise of the rights of the data subject
+      3.1.1.1  Article 12(1)
+  ...
+  3.2  Section 2 Information and access to personal data
+    3.2.1  Article 13 Information to be provided where personal data are collected from the data subject
+```
 
 Summaries are built **bottom-up**: each section is summarized from its own
 text plus its subsections' summaries, ending with the whole document. They
@@ -164,18 +193,25 @@ These will be measured and expanded as the project matures:
   thousands of documents.
 - Indexing with `--summarize` makes one LLM call per section (about 1 minute
   for a 2-page policy with `qwen2.5:7b` on a laptop).
-- PDFs whose headings are neither bookmarked nor in a larger font (such as
-  the official GDPR text) are not split into sections yet.
+- PDFs whose headings are neither bookmarked, in a larger font, nor in the
+  EU legal layout are not split into sections.
+- The `legal` strategy is tuned to the EUR-Lex layout. Other legal texts
+  (such as India's DPDP Act) will need their own patterns.
 
 ## Changelog
 
 Newest first. Dates are YYYY-MM-DD.
 
-### Unreleased
-- **Added:** bottom-up LLM node summaries (`regtrace.tree.summarize`) and the
-  `build-index --summarize` option, with progress, timing and failure counts.
+### 2026-11-24
+- **Added:** `legal` heading strategy for EU legal texts. The GDPR is now
+  parsed into 11 chapters, 99 articles and their paragraphs. `auto` picks it
+  when a PDF has no bookmarks but has `Article N` headings.
 - **Fixed:** outlines no longer repeat a section number that is already part
   of the heading (`1.1 1.1 How to contact us`).
+
+### 2026-11-20
+- **Added:** bottom-up LLM node summaries (`regtrace.tree.summarize`) and the
+  `build-index --summarize` option, with progress, timing and failure counts.
 
 ### 2026-11-17
 - **Added:** section tree model, Ollama LLM client with structured output and
