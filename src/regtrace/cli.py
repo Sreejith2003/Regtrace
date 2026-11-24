@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from regtrace import __version__
 from regtrace.config import load_settings
+from regtrace.evidence import Report, check_policy
 from regtrace.llm import LLMConnectionError, LLMError, create_client
 from regtrace.parsing import fetch_html, parse_html, parse_html_file, parse_pdf
 from regtrace.regulations import LinkedObligation, link_pack, load_pack
@@ -20,6 +21,7 @@ from regtrace.tree import DocumentTree, Node, summarize_tree
 
 DEFAULT_INDEX_DIR = Path("data") / "index"
 DEFAULT_PACK = Path("packs") / "gdpr"
+DEFAULT_RESULTS_DIR = Path("data") / "results"
 
 app = typer.Typer(
     name="regtrace",
@@ -173,7 +175,7 @@ def _summarize(tree: DocumentTree) -> None:
 def check_pack(
     pack_dir: Path = typer.Argument(DEFAULT_PACK, help="Regulation pack folder."),
     regulation: Path | None = typer.Option(
-        None, "--regulation", "-r", help="Regulation index JSON [default: from pack.yaml]."
+        None, "--regulation", "-r", help="Regulation index JSON (default: from pack.yaml)."
     ),
     show: str | None = typer.Option(None, "--show", help="Print one obligation in full."),
 ) -> None:
@@ -243,6 +245,93 @@ def _print_obligation(item: LinkedObligation) -> None:
     if item.cross_refs:
         typer.echo("")
         typer.echo(f"Cross-references: Art. {', '.join(item.cross_refs)}")
+
+
+@app.command()
+def check(
+    policy_index: Path = typer.Argument(..., help="Policy index JSON (from build-index)."),
+    pack_dir: Path = typer.Option(DEFAULT_PACK, "--pack", "-p", help="Regulation pack folder."),
+    regulation: Path | None = typer.Option(
+        None, "--regulation", "-r", help="Regulation index JSON (default: from pack.yaml)."
+    ),
+    only: list[str] | None = typer.Option(
+        None, "--only", help="Check only this obligation id (repeatable)."
+    ),
+    model: str | None = typer.Option(None, "--model", "-m", help="Override LLM_MODEL."),
+    out: Path | None = typer.Option(
+        None, "--out", "-o", help="Report JSON (default: data/results/<policy>.<pack>.json)."
+    ),
+) -> None:
+    """Check a policy against every obligation of a pack and print the compliance matrix."""
+    try:
+        policy = DocumentTree.load(policy_index)
+        pack = load_pack(pack_dir)
+        regulation_tree = DocumentTree.load(regulation or Path(pack.index))
+    except (OSError, ValueError) as exc:
+        typer.secho(f"FAILED: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    links = link_pack(pack, regulation_tree)
+    if not links.ok:
+        typer.secho("FAILED: the pack does not link, run check-pack", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+    unknown = sorted(set(only or []) - {o.id for o in pack.obligations})
+    if unknown:
+        typer.secho(f"FAILED: unknown obligation {', '.join(unknown)}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+    client = create_client(model=model)
+    typer.echo(f"Checking {policy.title} against {pack.name} with {client.model} ...")
+
+    def progress(done: int, total: int, item: LinkedObligation) -> None:
+        typer.echo(f"  [{done}/{total}] {item.obligation.id}")
+
+    try:
+        report = check_policy(
+            policy, links, client, regulation=regulation_tree, only=only, on_progress=progress
+        )
+    except LLMConnectionError as exc:
+        typer.secho(f"FAILED: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo("")
+    print_matrix(report)
+    out = out or DEFAULT_RESULTS_DIR / f"{policy.doc_id}.{pack.id}.json"
+    report.save(out)
+    typer.echo("")
+    typer.secho(f"Saved report to {out}", fg=typer.colors.GREEN)
+
+
+_STATUS_COLORS = {
+    "compliant": typer.colors.GREEN,
+    "partial": typer.colors.YELLOW,
+    "gap": typer.colors.RED,
+    "not_addressed": typer.colors.RED,
+    "depends": typer.colors.CYAN,
+}
+
+
+def print_matrix(report: Report) -> None:
+    width = max((len(f.obligation_id) for f in report.findings), default=2)
+    typer.echo(f"{'Obligation':<{width}}  {'Ref':<9} {'Status':<14} {'Sections':<12} Explanation")
+    for f in report.findings:
+        status = f.status.value if f.status else "error"
+        sections = ",".join(f.sections_read) or "-"
+        if len(sections) > 12:
+            sections = sections[:11] + "+"
+        note = f.error or f.explanation
+        note = note if len(note) <= 90 else note[:87] + "..."
+        typer.echo(f"{f.obligation_id:<{width}}  {f.ref:<9} ", nl=False)
+        typer.secho(f"{status:<14}", fg=_STATUS_COLORS.get(status, typer.colors.MAGENTA), nl=False)
+        typer.echo(f" {sections:<12} {note}")
+    counts = report.counts()
+    summary = ", ".join(f"{counts[k]} {k}" for k in [*_STATUS_COLORS, "error"] if k in counts)
+    calls = sum(f.llm_calls for f in report.findings)
+    typer.echo("")
+    typer.echo(f"{summary}  ({calls} LLM calls, {report.seconds:.0f}s)")
+    warned = [f for f in report.findings if f.warnings]
+    for f in warned:
+        typer.secho(f"  warning {f.obligation_id}: {'; '.join(f.warnings)}", fg=typer.colors.YELLOW)
 
 
 if __name__ == "__main__":

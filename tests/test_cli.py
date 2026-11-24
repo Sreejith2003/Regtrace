@@ -4,6 +4,7 @@ from typer.testing import CliRunner
 
 from regtrace import __version__
 from regtrace.cli import app
+from regtrace.evidence import JudgeReply, Report, SectionChoice
 from regtrace.llm import LLMConnectionError
 from regtrace.tree import DocumentTree, Node, assign_ids
 
@@ -276,3 +277,75 @@ def test_check_pack_fails_without_regulation_index(tmp_path):
     result = runner.invoke(app, ["check-pack", str(folder), "-r", str(tmp_path / "none.json")])
 
     assert result.exit_code == 1
+
+
+class _CheckClient:
+    model = "fake-judge"
+
+    def generate_structured(self, prompt, schema, *, system=None):
+        if schema is SectionChoice:
+            return SectionChoice(section_ids=["1"], reason="identity")
+        return JudgeReply(
+            quotes=[{"section_id": "1", "text": "Acme Ltd."}],
+            explanation="The controller is named.",
+            status="compliant",
+            fix="",
+        )
+
+
+def _write_policy(path):
+    root = Node(title="Policy", children=[Node(title="Who we are", text="Acme Ltd.")])
+    assign_ids(root)
+    DocumentTree(doc_id="acme", title="Policy", source="p", source_type="html", root=root).save(
+        path
+    )
+    return path
+
+
+def test_check_prints_matrix_and_saves_report(tmp_path, monkeypatch):
+    monkeypatch.setattr("regtrace.cli.create_client", lambda model=None: _CheckClient())
+    folder = _write_pack(tmp_path / "pack")
+    regulation = _write_regulation(tmp_path / "gdpr.json")
+    policy = _write_policy(tmp_path / "acme.json")
+    out = tmp_path / "report.json"
+
+    result = runner.invoke(
+        app, ["check", str(policy), "-p", str(folder), "-r", str(regulation), "-o", str(out)]
+    )
+
+    assert result.exit_code == 0
+    assert "t-identity  13(1)(a)  compliant" in result.output
+    assert "1 compliant  (2 LLM calls" in result.output
+    report = Report.load(out)
+    assert report.model == "fake-judge"
+    assert report.findings[0].quotes[0].text == "Acme Ltd."
+
+
+def test_check_rejects_unknown_obligation(tmp_path, monkeypatch):
+    monkeypatch.setattr("regtrace.cli.create_client", lambda model=None: _CheckClient())
+    folder = _write_pack(tmp_path / "pack")
+    regulation = _write_regulation(tmp_path / "gdpr.json")
+    policy = _write_policy(tmp_path / "acme.json")
+
+    result = runner.invoke(
+        app, ["check", str(policy), "-p", str(folder), "-r", str(regulation), "--only", "nope"]
+    )
+
+    assert result.exit_code == 1
+    assert "unknown obligation nope" in result.output
+
+
+def test_check_fails_cleanly_when_llm_unreachable(tmp_path, monkeypatch):
+    error = LLMConnectionError("Could not reach Ollama")
+    monkeypatch.setattr("regtrace.cli.create_client", lambda model=None: _FakeClient(error))
+    folder = _write_pack(tmp_path / "pack")
+    regulation = _write_regulation(tmp_path / "gdpr.json")
+    policy = _write_policy(tmp_path / "acme.json")
+    out = tmp_path / "report.json"
+
+    result = runner.invoke(
+        app, ["check", str(policy), "-p", str(folder), "-r", str(regulation), "-o", str(out)]
+    )
+
+    assert result.exit_code == 1
+    assert not out.exists()
