@@ -8,9 +8,9 @@ RegTrace checks a company's policy documents against a regulation and reports
 where the policy falls short: which obligation, what the policy says (quoted
 verbatim), whether it is compliant, and how to fix it.
 
-> **Status:** early development (Phase 1). Privacy policies and the GDPR text
-> can be parsed into section trees with LLM summaries; compliance checking is
-> not built yet.
+> **Status:** early development (Phase 1). Privacy policies (PDF, HTML or a
+> URL) and the GDPR text can be parsed into section trees with LLM summaries;
+> compliance checking is not built yet.
 
 > **Disclaimer:** RegTrace is meant to assist compliance analysts. It is **not
 > legal advice**, and its output must be reviewed by a qualified person.
@@ -50,6 +50,7 @@ All models run locally through [Ollama](https://ollama.com) (default:
 - [ ] Parse documents into section trees
   - [x] Tree model, LLM client, PDF parser (bookmarks / font sizes)
   - [x] Legal-text parser: chapters, sections, articles, paragraphs (GDPR)
+  - [x] HTML parser and `build-index <url>` for real web privacy policies
   - [x] Bottom-up LLM summaries per section (`build-index --summarize`)
   - [ ] Design note for summaries (ADR 0004)
 - [ ] GDPR Articles 12–14 obligations pack
@@ -103,18 +104,25 @@ python scripts\make_sample_policies.py     # writes to data\samples\
 
 ### Build an index
 
-`build-index` parses a PDF into a section tree, prints its outline and saves
-it as JSON (default: `data\index\<doc>.json`):
+`build-index` parses a PDF, an HTML file or a web page into a section tree,
+prints its outline and saves it as JSON (default: `data\index\<doc>.json`):
 
 ```powershell
 regtrace build-index data\samples\brightleaf-coffee.pdf
 regtrace build-index data\samples\brightleaf-coffee.pdf --summarize
+regtrace build-index https://www.spotify.com/uk/legal/privacy-policy/ --doc-id spotify
+regtrace build-index data\raw\policies\bbc.html
 ```
+
+For HTML, `<h1>`–`<h6>` become the sections. Navigation, headers, footers,
+scripts and other page chrome outside the main content are dropped. A single
+`<h1>` at the top becomes the document title.
 
 | Option | Meaning |
 |---|---|
 | `--out`, `-o` | Where to write the JSON index |
-| `--strategy` | How to find headings: `auto` (default), `bookmarks`, `legal`, `fonts` |
+| `--doc-id` | Document id, used for the file name [default: from the file name or URL] |
+| `--strategy` | How to find headings in a PDF: `auto` (default), `bookmarks`, `legal`, `fonts` |
 | `--summarize` | Add a short LLM summary to every section (needs Ollama running) |
 
 `auto` uses the PDF's bookmarks if it has any, then the `legal` layout if it
@@ -195,6 +203,11 @@ These will be measured and expanded as the project matures:
   for a 2-page policy with `qwen2.5:7b` on a laptop).
 - PDFs whose headings are neither bookmarked, in a larger font, nor in the
   EU legal layout are not split into sections.
+- Web pages that build their text with JavaScript come out empty, and some
+  sites refuse automated downloads (HTTP 403). For those, save the page from
+  your browser (Ctrl+S, "Webpage, HTML only") and index the `.html` file.
+- Pages that use bold text instead of `<h2>`/`<h3>` headings (for example
+  Mozilla's notices) end up with few sections; all text is still kept.
 - The `legal` strategy is tuned to the EUR-Lex layout. Other legal texts
   (such as India's DPDP Act) will need their own patterns.
 
@@ -203,6 +216,8 @@ These will be measured and expanded as the project matures:
 Newest first. Dates are YYYY-MM-DD.
 
 ### 2026-11-24
+- **Added:** HTML parser (`regtrace.parsing.html`). `build-index` now accepts
+  `.html` files and `http(s)` URLs, plus a `--doc-id` option.
 - **Added:** `legal` heading strategy for EU legal texts. The GDPR is now
   parsed into 11 chapters, 99 articles and their paragraphs. `auto` picks it
   when a PDF has no bookmarks but has `Article N` headings.

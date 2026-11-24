@@ -1,3 +1,4 @@
+import httpx
 import pymupdf
 from typer.testing import CliRunner
 
@@ -139,3 +140,60 @@ def test_build_index_rejects_missing_file(tmp_path):
     result = runner.invoke(app, ["build-index", str(tmp_path / "missing.pdf")])
 
     assert result.exit_code != 0
+
+
+POLICY_HTML = "<h1>Policy</h1><h2>Who we are</h2><p>Acme Ltd.</p><h2>Your rights</h2><p>Ask.</p>"
+
+
+def test_build_index_reads_html_file(tmp_path):
+    page = tmp_path / "policy.html"
+    page.write_text(POLICY_HTML, encoding="utf-8")
+    out = tmp_path / "policy.json"
+
+    result = runner.invoke(app, ["build-index", str(page), "--out", str(out)])
+
+    assert result.exit_code == 0
+    assert "Sections: 2" in result.output
+    assert "Pages:" not in result.output
+    assert DocumentTree.load(out).source_type == "html"
+
+
+def test_build_index_fetches_url(tmp_path, monkeypatch):
+    urls = []
+
+    def fake_fetch(url):
+        urls.append(url)
+        return POLICY_HTML
+
+    monkeypatch.setattr("regtrace.cli.fetch_html", fake_fetch)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["build-index", "https://www.acme.example/legal/privacy?lang=en"])
+
+    assert result.exit_code == 0
+    assert urls == ["https://www.acme.example/legal/privacy?lang=en"]
+    tree = DocumentTree.load(tmp_path / "data" / "index" / "acme-example-legal-privacy.json")
+    assert tree.source == "https://www.acme.example/legal/privacy?lang=en"
+
+
+def test_build_index_doc_id_option(tmp_path, monkeypatch):
+    page = tmp_path / "policy.html"
+    page.write_text(POLICY_HTML, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["build-index", str(page), "--doc-id", "acme"])
+
+    assert result.exit_code == 0
+    assert (tmp_path / "data" / "index" / "acme.json").is_file()
+
+
+def test_build_index_fails_cleanly_when_url_unreachable(tmp_path, monkeypatch):
+    def fake_fetch(url):
+        raise httpx.ConnectError("no route")
+
+    monkeypatch.setattr("regtrace.cli.fetch_html", fake_fetch)
+
+    result = runner.invoke(app, ["build-index", "https://acme.example/privacy"])
+
+    assert result.exit_code == 1
+    assert "FAILED" in result.output
