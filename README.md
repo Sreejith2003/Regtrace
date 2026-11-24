@@ -48,12 +48,12 @@ All models run locally through [Ollama](https://ollama.com) (default:
 ## Roadmap
 
 - [x] Project setup (packaging, CI, design notes)
-- [ ] Parse documents into section trees
+- [x] Parse documents into section trees
   - [x] Tree model, LLM client, PDF parser (bookmarks / font sizes)
   - [x] Legal-text parser: chapters, sections, articles, paragraphs (GDPR)
   - [x] HTML parser and `build-index <url>` for real web privacy policies
   - [x] Bottom-up LLM summaries per section (`build-index --summarize`)
-  - [ ] Design note for summaries (ADR 0005)
+  - [x] Design note for summaries (ADR 0005)
 - [x] GDPR Articles 12–14 obligations pack
   - [x] 19 obligations with conditions (`packs/gdpr/`, ADR 0004)
   - [x] Art. 4 definitions and cross-references linked (`check-pack`)
@@ -278,6 +278,7 @@ These will be measured and expanded as the project matures:
 Newest first. Dates are YYYY-MM-DD.
 
 ### 2026-11-24
+- **Added:** ADR 0005 on bottom-up node summaries; Phase 1 is complete.
 - **Added:** GDPR obligations pack (`packs/gdpr/`): 19 obligations from
   Arts. 12–14, a loader and linker (`regtrace.regulations`) that attach Art. 4
   definitions and cross-references, the `check-pack` command and ADR 0004.
