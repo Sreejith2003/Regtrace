@@ -287,6 +287,7 @@ class _CheckClient:
             return SectionChoice(section_ids=["1"], reason="identity")
         return JudgeReply(
             quotes=[{"section_id": "1", "text": "Acme Ltd."}],
+            condition_met="yes",
             explanation="The controller is named.",
             status="compliant",
             fix="",

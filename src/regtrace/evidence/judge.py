@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from regtrace.evidence.models import Status
@@ -20,15 +22,19 @@ word for word from the excerpts, never paraphrased or invented. This assists a h
 reviewer and is not legal advice."""
 
 STATUS_RULES = """\
+condition_met: for a conditional requirement, "yes" if the excerpts show the condition \
+holds, "no" if they show it does not hold, "unknown" if they do not say. For a requirement \
+without a condition, always "yes".
 Statuses:
-- compliant: the excerpts clearly give everything the requirement asks for.
-- partial: the excerpts address it, but something required is missing or too vague.
+- compliant: the excerpts give the core information the requirement asks for, even in \
+other words. Do not mark it down for style alone.
+- partial: the excerpts address it, but a required element is clearly missing or too vague \
+to be useful.
 - gap: the policy covers the topic but leaves out or contradicts the core of the requirement.
-- not_addressed: none of the excerpts deal with the requirement at all.
-- depends: the requirement only applies under a condition, and the excerpts do not show \
-whether that condition holds.
-If the requirement is conditional and the excerpts show the condition does not hold, \
-answer compliant and say why."""
+- not_addressed: none of the excerpts deal with the requirement.
+- depends: the requirement is conditional, condition_met is "unknown", and the excerpts do \
+not provide the information.
+Never claim the policy says something that your quotes do not show."""
 
 
 class QuoteReply(BaseModel):
@@ -38,6 +44,7 @@ class QuoteReply(BaseModel):
 
 class JudgeReply(BaseModel):
     quotes: list[QuoteReply]
+    condition_met: Literal["yes", "no", "unknown"]
     explanation: str
     status: Status
     fix: str
@@ -96,9 +103,10 @@ def build_prompt(
     lines.append(
         "Work in this order. quotes: copy the 1-3 most relevant sentences exactly as written, "
         "with their section_id; leave empty only if no excerpt deals with the requirement. "
-        "explanation: 2-3 sentences comparing the quotes with the requirement. status: one of "
-        "the statuses above. fix: one concrete sentence the policy should add or change "
-        "(required unless compliant)" + (", more_sections." if allow_more and outline else ".")
+        "condition_met: yes, no or unknown. explanation: 2-3 sentences comparing the quotes "
+        "with the requirement. status: one of the statuses above. fix: one concrete sentence "
+        "the policy should add or change (required unless compliant or depends)"
+        + (", more_sections." if allow_more and outline else ".")
     )
     return "\n".join(lines)
 

@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 
-from regtrace.evidence.judge import judge
+from regtrace.evidence.judge import JudgeReply, judge
 from regtrace.evidence.models import Finding, Quote, Report, Status
 from regtrace.evidence.navigator import (
     choose_sections,
@@ -60,22 +60,36 @@ def check_obligation(
         finding.seconds = round(time.perf_counter() - start, 1)
         return finding
 
-    finding.status = reply.status
+    status = _apply_condition(item, reply)
+    finding.status = status
     finding.sections_read = read
     finding.explanation = reply.explanation.strip()
-    finding.fix = "" if reply.status == Status.compliant else reply.fix.strip()
+    if status != reply.status:
+        finding.warnings.append(f"status {reply.status.value} -> {status.value} by condition")
+    finding.fix = "" if status == Status.compliant else reply.fix.strip()
+    readable = {n.id for node_id in read for n in policy.get(node_id).walk()}
     for quote in reply.quotes[:3]:
         section_id = quote.section_id.strip().removeprefix("section").strip()
-        if section_id in read and quote.text.strip():
+        if section_id in readable and quote.text.strip():
             finding.quotes.append(Quote(section_id=section_id, text=quote.text.strip()))
         else:
             finding.warnings.append(f"quote from a section that was not read: {section_id!r}")
-    if reply.status in (Status.compliant, Status.partial) and not finding.quotes:
-        finding.warnings.append(f"status {reply.status.value} without a supporting quote")
-    if reply.status != Status.compliant and not finding.fix:
+    if status in (Status.compliant, Status.partial) and not finding.quotes:
+        finding.warnings.append(f"status {status.value} without a supporting quote")
+    if status not in (Status.compliant, Status.depends) and not finding.fix:
         finding.warnings.append("no suggested fix")
     finding.seconds = round(time.perf_counter() - start, 1)
     return finding
+
+
+def _apply_condition(item: LinkedObligation, reply: JudgeReply) -> Status:
+    if not item.obligation.conditional:
+        return reply.status
+    if reply.condition_met == "no":
+        return Status.compliant
+    if reply.condition_met == "unknown" and reply.status in (Status.gap, Status.not_addressed):
+        return Status.depends
+    return reply.status
 
 
 def check_policy(

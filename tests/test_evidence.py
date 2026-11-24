@@ -92,9 +92,10 @@ class ScriptedClient:
         return reply
 
 
-def verdict(status, quotes=(), fix="Add the retention period.", more=()):
+def verdict(status, quotes=(), fix="Add the retention period.", more=(), condition="yes"):
     return JudgeReply(
         quotes=[{"section_id": s, "text": t} for s, t in quotes],
+        condition_met=condition,
         explanation="Because.",
         status=status,
         fix=fix,
@@ -237,6 +238,49 @@ def test_llm_error_is_recorded_and_connection_error_raised():
 
     with pytest.raises(LLMConnectionError):
         check_obligation(make_policy(), linked(), ScriptedClient(LLMConnectionError("down")))
+
+
+def test_quote_from_subsection_of_a_read_section_is_kept():
+    client = ScriptedClient(
+        SectionChoice(section_ids=["1"]),
+        verdict(Status.compliant, quotes=[("1.1", "Our DPO is reachable at dpo@acme.example.")]),
+    )
+
+    finding = check_obligation(make_policy(), linked(), client)
+
+    assert [q.section_id for q in finding.quotes] == ["1.1"]
+    assert finding.warnings == []
+
+
+@pytest.mark.parametrize(
+    ("condition_met", "status", "expected"),
+    [
+        ("unknown", Status.not_addressed, Status.depends),
+        ("unknown", Status.gap, Status.depends),
+        ("unknown", Status.partial, Status.partial),
+        ("no", Status.not_addressed, Status.compliant),
+        ("yes", Status.not_addressed, Status.not_addressed),
+    ],
+)
+def test_condition_decides_conditional_obligations(condition_met, status, expected):
+    client = ScriptedClient(
+        SectionChoice(section_ids=["2"]),
+        verdict(status, quotes=[("2", "We keep order data.")], condition=condition_met),
+    )
+
+    finding = check_obligation(make_policy(), linked(condition="A DPO exists."), client)
+
+    assert finding.status == expected
+    if expected == Status.compliant:
+        assert finding.fix == ""
+
+
+def test_condition_is_ignored_for_unconditional_obligations():
+    client = ScriptedClient(
+        SectionChoice(section_ids=["2"]), verdict(Status.not_addressed, condition="unknown")
+    )
+
+    assert check_obligation(make_policy(), linked(), client).status == Status.not_addressed
 
 
 # --- whole policy ---
