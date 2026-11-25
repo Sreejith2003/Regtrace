@@ -6,8 +6,8 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 
-from regtrace.evidence.judge import JudgeReply, judge
-from regtrace.evidence.models import Finding, Quote, Report, Status
+from regtrace.evidence.judge import judge
+from regtrace.evidence.models import ConditionMet, Finding, Quote, Report, Status
 from regtrace.evidence.navigator import (
     choose_sections,
     read_sections,
@@ -29,9 +29,19 @@ def check_obligation(
     client: LLMClient,
     *,
     regulation: DocumentTree | None = None,
+    assume: ConditionMet | None = None,
 ) -> Finding:
     o = item.obligation
-    finding = Finding(obligation_id=o.id, ref=o.ref, title=o.title)
+    finding = Finding(obligation_id=o.id, ref=o.ref, title=o.title, condition=o.condition)
+    if not o.conditional:
+        assume = None
+    if assume == "no":
+        finding.status = Status.compliant
+        finding.condition_met = "no"
+        finding.assumed = True
+        finding.explanation = "Does not apply: the condition was answered as not met."
+        return finding
+
     start = time.perf_counter()
     try:
         choice = choose_sections(policy, item, client)
@@ -60,20 +70,27 @@ def check_obligation(
         finding.seconds = round(time.perf_counter() - start, 1)
         return finding
 
-    status = _apply_condition(item, reply)
-    finding.status = status
     finding.sections_read = read
+    finding.judged_status = reply.status
     finding.explanation = reply.explanation.strip()
+    finding.quotes = [
+        Quote(section_id=q.section_id.strip().removeprefix("section").strip(), text=q.text.strip())
+        for q in reply.quotes[:3]
+        if q.text.strip()
+    ]
+    if o.conditional:
+        finding.condition_met = assume or reply.condition_met
+        finding.assumed = assume is not None
+    status = resolve_status(finding)
+    finding.status = status
     if status != reply.status:
         finding.warnings.append(f"status {reply.status.value} -> {status.value} by condition")
-    finding.fix = "" if status == Status.compliant else reply.fix.strip()
-    readable = {n.id for node_id in read for n in policy.get(node_id).walk()}
-    for quote in reply.quotes[:3]:
-        section_id = quote.section_id.strip().removeprefix("section").strip()
-        if section_id in readable and quote.text.strip():
-            finding.quotes.append(Quote(section_id=section_id, text=quote.text.strip()))
-        else:
-            finding.warnings.append(f"quote from a section that was not read: {section_id!r}")
+    if status == Status.compliant:
+        finding.fix = ""
+    elif status == Status.depends:
+        finding.fix = reply.fix.strip() or f"If this applies ({o.condition}), state: {o.what}"
+    else:
+        finding.fix = reply.fix.strip()
     if status in (Status.compliant, Status.partial) and not finding.quotes:
         finding.warnings.append(f"status {status.value} without a supporting quote")
     if status not in (Status.compliant, Status.depends) and not finding.fix:
@@ -82,14 +99,19 @@ def check_obligation(
     return finding
 
 
-def _apply_condition(item: LinkedObligation, reply: JudgeReply) -> Status:
-    if not item.obligation.conditional:
-        return reply.status
-    if reply.condition_met == "no":
+def resolve_status(finding: Finding) -> Status:
+    """Apply the condition in code; `depends` is only possible when the condition is unknown."""
+    status = finding.judged_status
+    if status is None:
+        raise ValueError("finding has not been judged")
+    met = finding.condition_met if finding.condition is not None else "yes"
+    if met == "no":
         return Status.compliant
-    if reply.condition_met == "unknown" and reply.status in (Status.gap, Status.not_addressed):
+    if met == "unknown" and status in (Status.gap, Status.not_addressed, Status.depends):
         return Status.depends
-    return reply.status
+    if status == Status.depends:
+        return Status.partial if finding.quotes else Status.not_addressed
+    return status
 
 
 def check_policy(
@@ -99,6 +121,7 @@ def check_policy(
     *,
     regulation: DocumentTree | None = None,
     only: list[str] | None = None,
+    assume: dict[str, ConditionMet] | None = None,
     on_progress: ProgressCallback | None = None,
 ) -> Report:
     items = [i for i in links.linked if not only or i.obligation.id in only]
@@ -109,11 +132,15 @@ def check_policy(
         pack_id=links.pack_id,
         model=getattr(client, "model", "unknown"),
         created=datetime.now(UTC).isoformat(timespec="seconds"),
+        assumptions=dict(assume or {}),
     )
     start = time.perf_counter()
     for done, item in enumerate(items, start=1):
         if on_progress is not None:
             on_progress(done, len(items), item)
-        report.findings.append(check_obligation(policy, item, client, regulation=regulation))
+        answer = report.assumptions.get(item.obligation.id)
+        report.findings.append(
+            check_obligation(policy, item, client, regulation=regulation, assume=answer)
+        )
     report.seconds = round(time.perf_counter() - start, 1)
     return report

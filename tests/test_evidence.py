@@ -201,20 +201,25 @@ def test_check_obligation_reads_more_sections_when_asked():
     assert "more_sections" not in client.prompts[2][1]
 
 
-def test_check_obligation_flags_bad_quotes_and_missing_fix():
+def test_check_obligation_keeps_quotes_for_verification_and_flags_missing_fix():
     client = ScriptedClient(
         SectionChoice(section_ids=["2"]),
-        verdict(Status.partial, quotes=[("3", "You can ask for access.")], fix=""),
+        verdict(Status.partial, quotes=[("section 3", "You can ask."), ("2", "  ")], fix=""),
     )
 
     finding = check_obligation(make_policy(), linked(), client)
 
-    assert finding.quotes == []
-    assert finding.warnings == [
-        "quote from a section that was not read: '3'",
-        "status partial without a supporting quote",
-        "no suggested fix",
-    ]
+    assert [(q.section_id, q.text) for q in finding.quotes] == [("3", "You can ask.")]
+    assert finding.judged_status == Status.partial
+    assert finding.warnings == ["no suggested fix"]
+
+
+def test_check_obligation_warns_about_support_without_quotes():
+    client = ScriptedClient(SectionChoice(section_ids=["2"]), verdict(Status.compliant))
+
+    finding = check_obligation(make_policy(), linked(), client)
+
+    assert finding.warnings == ["status compliant without a supporting quote"]
 
 
 def test_check_obligation_on_policy_without_sections_reads_whole_document():
@@ -280,7 +285,84 @@ def test_condition_is_ignored_for_unconditional_obligations():
         SectionChoice(section_ids=["2"]), verdict(Status.not_addressed, condition="unknown")
     )
 
-    assert check_obligation(make_policy(), linked(), client).status == Status.not_addressed
+    finding = check_obligation(make_policy(), linked(), client)
+
+    assert finding.status == Status.not_addressed
+    assert finding.condition is None
+    assert finding.condition_met is None
+
+
+@pytest.mark.parametrize(
+    ("condition", "condition_met", "quotes", "expected"),
+    [
+        (None, "yes", [], Status.not_addressed),
+        (None, "yes", [("2", "We keep order data.")], Status.partial),
+        ("A DPO exists.", "yes", [], Status.not_addressed),
+        ("A DPO exists.", "unknown", [], Status.depends),
+    ],
+)
+def test_depends_is_only_kept_when_the_condition_is_unknown(
+    condition, condition_met, quotes, expected
+):
+    client = ScriptedClient(
+        SectionChoice(section_ids=["2"]),
+        verdict(Status.depends, quotes=quotes, condition=condition_met, fix=""),
+    )
+
+    finding = check_obligation(make_policy(), linked(condition=condition), client)
+
+    assert finding.status == expected
+
+
+def test_depends_gets_a_conditional_fix():
+    client = ScriptedClient(
+        SectionChoice(section_ids=["2"]), verdict(Status.gap, condition="unknown", fix="")
+    )
+
+    finding = check_obligation(make_policy(), linked(condition="A DPO exists."), client)
+
+    assert finding.status == Status.depends
+    assert finding.condition == "A DPO exists."
+    assert (
+        finding.fix
+        == "If this applies (A DPO exists.), state: State how long personal data are stored."
+    )
+
+
+def test_assume_no_skips_the_llm():
+    client = ScriptedClient()
+
+    finding = check_obligation(
+        make_policy(), linked(condition="A DPO exists."), client, assume="no"
+    )
+
+    assert finding.status == Status.compliant
+    assert finding.assumed
+    assert finding.llm_calls == 0
+    assert client.prompts == []
+
+
+def test_assume_yes_overrides_the_model():
+    client = ScriptedClient(
+        SectionChoice(section_ids=["2"]), verdict(Status.not_addressed, condition="unknown")
+    )
+
+    finding = check_obligation(
+        make_policy(), linked(condition="A DPO exists."), client, assume="yes"
+    )
+
+    assert finding.status == Status.not_addressed
+    assert finding.condition_met == "yes"
+    assert finding.assumed
+
+
+def test_assume_is_ignored_for_unconditional_obligations():
+    client = ScriptedClient(SectionChoice(section_ids=["2"]), verdict(Status.gap))
+
+    finding = check_obligation(make_policy(), linked(), client, assume="no")
+
+    assert finding.status == Status.gap
+    assert not finding.assumed
 
 
 # --- whole policy ---
@@ -326,3 +408,14 @@ def test_check_policy_only():
     report = check_policy(make_policy(), links, client, only=["gdpr-13-2-d"])
 
     assert [f.obligation_id for f in report.findings] == ["gdpr-13-2-d"]
+
+
+def test_check_policy_records_assumptions():
+    links = LinkResult(
+        pack_id="gdpr", definitions=[], linked=[linked(condition="A DPO exists.")], errors=[]
+    )
+
+    report = check_policy(make_policy(), links, ScriptedClient(), assume={"gdpr-13-2-a": "no"})
+
+    assert report.assumptions == {"gdpr-13-2-a": "no"}
+    assert report.findings[0].assumed
