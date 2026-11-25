@@ -8,11 +8,12 @@ RegTrace checks a company's policy documents against a regulation and reports
 where the policy falls short: which obligation, what the policy says (quoted
 verbatim), whether it is compliant, and how to fix it.
 
-> **Status:** early development (Phase 3 done). Policies (PDF, HTML or a URL)
+> **Status:** early development (Phase 4 done). Policies (PDF, HTML or a URL)
 > can be checked against the GDPR Arts. 12–14 obligations pack with
-> `regtrace check`, giving a compliance matrix with quotes and fixes. Quote
-> verification (Phase 4) and the evaluation against a chunked baseline
-> (Phases 5–6) are next, so results are not yet measured.
+> `regtrace check`, giving a compliance matrix with quotes, fixes and a
+> confidence rating. Every quote is checked against the policy text. The
+> chunked baseline and the evaluation (Phases 5–6) are next, so accuracy is
+> not yet measured.
 
 > **Disclaimer:** RegTrace is meant to assist compliance analysts. It is **not
 > legal advice**, and its output must be reviewed by a qualified person.
@@ -59,7 +60,8 @@ All models run locally through [Ollama](https://ollama.com) (default:
   - [x] 19 obligations with conditions (`packs/gdpr/`, ADR 0004)
   - [x] Art. 4 definitions and cross-references linked (`check-pack`)
 - [x] Evidence finding and compliance judgment (`regtrace check`, ADR 0006)
-- [ ] Quote verification
+- [x] Quote verification and confidence flags (`regtrace verify`, ADR 0007)
+  - [x] `depends` handling: open questions and `--assume` answers
 - [ ] Evaluation vs a chunked-RAG baseline
 - [ ] Compliance report and follow-up chat
 
@@ -260,8 +262,45 @@ regtrace check data\index\bbc.json --model qwen2.5:14b
 |---|---|
 | `--pack`, `-p` | Regulation pack folder (default `packs\gdpr`) |
 | `--only` | Check only this obligation id (repeatable) |
+| `--assume`, `-a` | Answer a condition, `ID=yes` or `ID=no` (repeatable) |
 | `--model`, `-m` | Use another Ollama model for this run |
 | `--out`, `-o` | Report JSON (default `data\results\<policy>.<pack>.json`) |
+
+### Verification and confidence
+
+After judging, every quote is looked up in the policy without the LLM
+([ADR 0007](docs/decisions/0007-quote-verification.md)) and graded:
+
+| Grade | Meaning | Verified |
+|---|---|---|
+| `exact` | Same text, ignoring whitespace | yes |
+| `normalized` | Same words, ignoring case and punctuation | yes |
+| `spliced` | Same words, joined from nearby passages | yes (flagged) |
+| `fuzzy` | At least 75% of the words match | no |
+| `not_found` | Not in the policy | no |
+
+A quote cited with the wrong section id is moved to the section where it
+really is. Each finding then gets a confidence: **low** if a quote was not
+found, or a `compliant`/`partial` verdict has no verified quote; **medium** for
+`depends`, flagged quotes or warnings; **high** otherwise. The matrix shows the
+confidence and verified quotes per finding (`Quotes 2/2`), so a reviewer can
+start with the low ones.
+
+Conditional obligations that the policy does not settle end in `depends`, and
+`check` lists them as open questions. Answer them and re-run just those:
+
+```powershell
+regtrace check data\index\brightleaf-coffee.json --only gdpr-12-1-children --assume gdpr-12-1-children=no
+```
+
+`no` means the obligation does not apply (no LLM call); `yes` makes the judge
+treat the condition as met. Saved reports can be re-verified offline, for
+example after re-indexing a policy:
+
+```powershell
+regtrace verify data\results\brightleaf-coffee.gdpr.json
+regtrace verify data\results\spotify.gdpr.json --policy data\index\spotify.json
+```
 
 <!-- RESULTS -->
 
@@ -301,15 +340,31 @@ These will be measured and expanded as the project matures:
   Mozilla's notices) end up with few sections; all text is still kept.
 - `check` makes 2–3 LLM calls per obligation (about 40–55 per policy). With
   `qwen2.5:7b` on a laptop that is roughly 10–15 minutes per policy.
-- A 7B judge is noisy, especially between `partial` and `compliant`. Quotes
-  are not yet verified against the source (Phase 4), and accuracy has not been
-  measured yet (Phase 6). Treat results as leads for a human reviewer.
+- A 7B judge is noisy, especially between `partial` and `compliant`, and
+  accuracy has not been measured yet (Phase 6). Treat results as leads for a
+  human reviewer.
+- Verification shows that a quote exists in the policy, not that it supports
+  the verdict. A `not_addressed` finding has no quotes, so a section the
+  navigator missed still gets `high` confidence.
+- `--assume` answers are per obligation, so a shared fact (such as data from
+  third parties) has to be given for each obligation that depends on it.
 - The `legal` strategy is tuned to the EUR-Lex layout. Other legal texts
   (such as India's DPDP Act) will need their own patterns.
 
 ## Changelog
 
 Newest first. Dates are YYYY-MM-DD.
+
+### 2026-11-25
+- **Added:** quote verification (`regtrace.verify`): five match grades,
+  section correction, per-finding confidence and flags, the `verify` command
+  for saved reports, and ADR 0007.
+- **Added:** `check --assume ID=yes|no` to answer conditions, open questions
+  for `depends` findings, and confidence and verified-quote columns in the
+  matrix.
+- **Changed:** `depends` is only kept for conditional obligations with an
+  unknown condition; quotes citing an unread section are kept and verified
+  instead of dropped.
 
 ### 2026-11-24
 - **Added:** evidence finder and judge (`regtrace.evidence`): tree
