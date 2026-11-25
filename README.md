@@ -8,10 +8,11 @@ RegTrace checks a company's policy documents against a regulation and reports
 where the policy falls short: which obligation, what the policy says (quoted
 verbatim), whether it is compliant, and how to fix it.
 
-> **Status:** early development (Phase 2 done). Privacy policies (PDF, HTML
-> or a URL) and the GDPR text can be parsed into section trees with LLM
-> summaries, and the GDPR Arts. 12–14 obligations pack is linked to the
-> regulation text. Compliance checking (Phase 3) is not built yet.
+> **Status:** early development (Phase 3 done). Policies (PDF, HTML or a URL)
+> can be checked against the GDPR Arts. 12–14 obligations pack with
+> `regtrace check`, giving a compliance matrix with quotes and fixes. Quote
+> verification (Phase 4) and the evaluation against a chunked baseline
+> (Phases 5–6) are next, so results are not yet measured.
 
 > **Disclaimer:** RegTrace is meant to assist compliance analysts. It is **not
 > legal advice**, and its output must be reviewed by a qualified person.
@@ -57,7 +58,7 @@ All models run locally through [Ollama](https://ollama.com) (default:
 - [x] GDPR Articles 12–14 obligations pack
   - [x] 19 obligations with conditions (`packs/gdpr/`, ADR 0004)
   - [x] Art. 4 definitions and cross-references linked (`check-pack`)
-- [ ] Evidence finding and compliance judgment
+- [x] Evidence finding and compliance judgment (`regtrace check`, ADR 0006)
 - [ ] Quote verification
 - [ ] Evaluation vs a chunked-RAG baseline
 - [ ] Compliance report and follow-up chat
@@ -236,6 +237,34 @@ OK: all 19 obligations linked
 Conditional obligations (`If = yes`) only apply in some cases, for example
 when a DPO exists or data leave the EEA. They can end in the `depends` status.
 
+### Check a policy
+
+`check` runs every obligation of the pack against an indexed policy and prints
+a compliance matrix ([ADR 0006](docs/decisions/0006-evidence-finder.md)). For
+each obligation the LLM:
+
+1. reads the policy outline and picks the sections to open,
+2. reads them together with the GDPR wording, the Art. 4 definitions it uses
+   and the provisions it refers to,
+3. returns verbatim quotes, an explanation, a status and a suggested fix,
+4. may ask once for more sections if the evidence was not enough.
+
+```powershell
+regtrace build-index data\samples\brightleaf-coffee.pdf --summarize
+regtrace check data\index\brightleaf-coffee.json
+regtrace check data\index\spotify.json --only gdpr-13-2-a-retention
+regtrace check data\index\bbc.json --model qwen2.5:14b
+```
+
+| Option | Meaning |
+|---|---|
+| `--pack`, `-p` | Regulation pack folder (default `packs\gdpr`) |
+| `--only` | Check only this obligation id (repeatable) |
+| `--model`, `-m` | Use another Ollama model for this run |
+| `--out`, `-o` | Report JSON (default `data\results\<policy>.<pack>.json`) |
+
+<!-- RESULTS -->
+
 ## Development
 
 ```powershell
@@ -270,6 +299,11 @@ These will be measured and expanded as the project matures:
   your browser (Ctrl+S, "Webpage, HTML only") and index the `.html` file.
 - Pages that use bold text instead of `<h2>`/`<h3>` headings (for example
   Mozilla's notices) end up with few sections; all text is still kept.
+- `check` makes 2–3 LLM calls per obligation (about 40–55 per policy). With
+  `qwen2.5:7b` on a laptop that is roughly 10–15 minutes per policy.
+- A 7B judge is noisy, especially between `partial` and `compliant`. Quotes
+  are not yet verified against the source (Phase 4), and accuracy has not been
+  measured yet (Phase 6). Treat results as leads for a human reviewer.
 - The `legal` strategy is tuned to the EUR-Lex layout. Other legal texts
   (such as India's DPDP Act) will need their own patterns.
 
@@ -278,6 +312,10 @@ These will be measured and expanded as the project matures:
 Newest first. Dates are YYYY-MM-DD.
 
 ### 2026-11-24
+- **Added:** evidence finder and judge (`regtrace.evidence`): tree
+  navigation, context expansion with definitions and cross-references,
+  five-status judgment with quotes and fixes, the `check` command with a
+  compliance matrix and JSON report, and ADR 0006.
 - **Added:** ADR 0005 on bottom-up node summaries; Phase 1 is complete.
 - **Added:** GDPR obligations pack (`packs/gdpr/`): 19 obligations from
   Arts. 12–14, a loader and linker (`regtrace.regulations`) that attach Art. 4
