@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 
-from regtrace.evidence.judge import judge
+from regtrace.evidence.judge import JudgeReply, judge
 from regtrace.evidence.models import ConditionMet, Finding, Quote, Report, Status
 from regtrace.evidence.navigator import (
     choose_sections,
@@ -23,6 +23,18 @@ MAX_ROUNDS = 2
 ProgressCallback = Callable[[int, int, LinkedObligation], None]
 
 
+def new_finding(item: LinkedObligation, assume: ConditionMet | None) -> Finding:
+    """A blank finding, already decided if the condition was answered as not met."""
+    o = item.obligation
+    finding = Finding(obligation_id=o.id, ref=o.ref, title=o.title, condition=o.condition)
+    if o.conditional and assume == "no":
+        finding.status = Status.compliant
+        finding.condition_met = "no"
+        finding.assumed = True
+        finding.explanation = "Does not apply: the condition was answered as not met."
+    return finding
+
+
 def check_obligation(
     policy: DocumentTree,
     item: LinkedObligation,
@@ -31,15 +43,8 @@ def check_obligation(
     regulation: DocumentTree | None = None,
     assume: ConditionMet | None = None,
 ) -> Finding:
-    o = item.obligation
-    finding = Finding(obligation_id=o.id, ref=o.ref, title=o.title, condition=o.condition)
-    if not o.conditional:
-        assume = None
-    if assume == "no":
-        finding.status = Status.compliant
-        finding.condition_met = "no"
-        finding.assumed = True
-        finding.explanation = "Does not apply: the condition was answered as not met."
+    finding = new_finding(item, assume)
+    if finding.status is not None:
         return finding
 
     start = time.perf_counter()
@@ -71,6 +76,15 @@ def check_obligation(
         return finding
 
     finding.sections_read = read
+    finish_finding(finding, item, reply, assume)
+    finding.seconds = round(time.perf_counter() - start, 1)
+    return finding
+
+
+def finish_finding(
+    finding: Finding, item: LinkedObligation, reply: JudgeReply, assume: ConditionMet | None
+) -> Finding:
+    o = item.obligation
     finding.judged_status = reply.status
     finding.explanation = reply.explanation.strip()
     finding.quotes = [
@@ -95,7 +109,6 @@ def check_obligation(
         finding.warnings.append(f"status {status.value} without a supporting quote")
     if status not in (Status.compliant, Status.depends) and not finding.fix:
         finding.warnings.append("no suggested fix")
-    finding.seconds = round(time.perf_counter() - start, 1)
     return finding
 
 
@@ -123,6 +136,8 @@ def check_policy(
     only: list[str] | None = None,
     assume: dict[str, ConditionMet] | None = None,
     on_progress: ProgressCallback | None = None,
+    check: Callable[..., Finding] | None = None,
+    method: str = "tree",
 ) -> Report:
     items = [i for i in links.linked if not only or i.obligation.id in only]
     report = Report(
@@ -131,6 +146,7 @@ def check_policy(
         policy_source=policy.source,
         pack_id=links.pack_id,
         model=getattr(client, "model", "unknown"),
+        method=method,
         created=datetime.now(UTC).isoformat(timespec="seconds"),
         assumptions=dict(assume or {}),
     )
@@ -140,7 +156,7 @@ def check_policy(
             on_progress(done, len(items), item)
         answer = report.assumptions.get(item.obligation.id)
         report.findings.append(
-            check_obligation(policy, item, client, regulation=regulation, assume=answer)
+            (check or check_obligation)(policy, item, client, regulation=regulation, assume=answer)
         )
     report.seconds = round(time.perf_counter() - start, 1)
     return report

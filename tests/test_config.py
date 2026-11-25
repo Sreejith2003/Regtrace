@@ -1,7 +1,13 @@
 import pytest
 from pydantic import ValidationError
 
-from regtrace.config import DEFAULT_MODEL, DEFAULT_NUM_CTX, Settings, load_settings
+from regtrace.config import (
+    DEFAULT_EMBED_MODEL,
+    DEFAULT_MODEL,
+    DEFAULT_NUM_CTX,
+    Settings,
+    load_settings,
+)
 
 
 def test_defaults_when_env_is_empty():
@@ -9,6 +15,7 @@ def test_defaults_when_env_is_empty():
 
     assert settings.llm_model == DEFAULT_MODEL
     assert settings.llm_num_ctx == DEFAULT_NUM_CTX
+    assert settings.llm_embed_model == DEFAULT_EMBED_MODEL
     assert str(settings.llm_host).startswith("http://localhost:11434")
 
 
@@ -18,8 +25,11 @@ def test_reads_values_from_env():
             "LLM_HOST": "http://gpu-box:11434",
             "LLM_MODEL": "qwen2.5:14b",
             "LLM_NUM_CTX": "16384",
+            "LLM_EMBED_MODEL": "mxbai-embed-large",
         }
     )
+
+    assert settings.llm_embed_model == "mxbai-embed-large"
 
     assert settings.llm_model == "qwen2.5:14b"
     assert settings.llm_num_ctx == 16384

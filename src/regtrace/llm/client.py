@@ -38,10 +38,18 @@ class LLMClient(Protocol):
         ...
 
 
+class Embedder(Protocol):
+    embed_model: str
+
+    def embed(self, texts: list[str]) -> list[list[float]]: ...
+
+
 class ChatBackend(Protocol):
     """The part of `ollama.Client` that `OllamaClient` uses (lets tests inject a fake)."""
 
     def chat(self, **kwargs: Any) -> Any: ...
+
+    def embed(self, **kwargs: Any) -> Any: ...
 
 
 class OllamaClient:
@@ -60,6 +68,7 @@ class OllamaClient:
         self.host = str(settings.llm_host).rstrip("/")
         self.model = model or settings.llm_model
         self.num_ctx = settings.llm_num_ctx
+        self.embed_model = settings.llm_embed_model
         self.max_retries = max_retries
         self._backend: ChatBackend = backend if backend is not None else ollama.Client(self.host)
 
@@ -99,6 +108,25 @@ class OllamaClient:
             f"Model {self.model!r} returned invalid output after "
             f"{self.max_retries + 1} attempts: {last_error}"
         )
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        try:
+            response = self._backend.embed(model=self.embed_model, input=texts)
+        except ConnectionError as exc:
+            raise LLMConnectionError(
+                f"Could not reach Ollama at {self.host}. Is it running? Try `ollama serve`."
+            ) from exc
+        except ollama.ResponseError as exc:
+            raise LLMError(
+                f"Ollama error for embedding model {self.embed_model!r}: {exc.error}. "
+                f"If the model is missing, run `ollama pull {self.embed_model}`."
+            ) from exc
+        vectors = [list(v) for v in response.embeddings]
+        if len(vectors) != len(texts):
+            raise LLMResponseError(f"Expected {len(texts)} embeddings, got {len(vectors)}")
+        return vectors
 
     def _chat(self, messages: list[dict[str, str]], json_schema: dict[str, Any]) -> str:
         try:

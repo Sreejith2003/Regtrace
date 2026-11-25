@@ -8,12 +8,12 @@ RegTrace checks a company's policy documents against a regulation and reports
 where the policy falls short: which obligation, what the policy says (quoted
 verbatim), whether it is compliant, and how to fix it.
 
-> **Status:** early development (Phase 4 done). Policies (PDF, HTML or a URL)
+> **Status:** early development (Phase 5 done). Policies (PDF, HTML or a URL)
 > can be checked against the GDPR Arts. 12–14 obligations pack with
 > `regtrace check`, giving a compliance matrix with quotes, fixes and a
-> confidence rating. Every quote is checked against the policy text. The
-> chunked baseline and the evaluation (Phases 5–6) are next, so accuracy is
-> not yet measured.
+> confidence rating. Every quote is checked against the policy text. A chunked
+> RAG baseline (`--method chunked`) runs with the same judge for comparison.
+> The evaluation (Phase 6) is next, so accuracy is not yet measured.
 
 > **Disclaimer:** RegTrace is meant to assist compliance analysts. It is **not
 > legal advice**, and its output must be reviewed by a qualified person.
@@ -62,7 +62,8 @@ All models run locally through [Ollama](https://ollama.com) (default:
 - [x] Evidence finding and compliance judgment (`regtrace check`, ADR 0006)
 - [x] Quote verification and confidence flags (`regtrace verify`, ADR 0007)
   - [x] `depends` handling: open questions and `--assume` answers
-- [ ] Evaluation vs a chunked-RAG baseline
+- [x] Chunked RAG baseline with the same judge (`--method chunked`, ADR 0008)
+- [ ] Evaluation: tree vs chunked baseline
 - [ ] Compliance report and follow-up chat
 
 The headline result will be a comparison of chunkless vs chunked RAG on
@@ -83,8 +84,9 @@ python -m venv rag
 # Install RegTrace with development tools
 pip install -e ".[dev]"
 
-# Pull the local model and configure
+# Pull the local models and configure
 ollama pull qwen2.5:7b
+ollama pull nomic-embed-text     # only for the chunked baseline
 copy .env.example .env
 
 # Check the setup
@@ -302,6 +304,25 @@ regtrace verify data\results\brightleaf-coffee.gdpr.json
 regtrace verify data\results\spotify.gdpr.json --policy data\index\spotify.json
 ```
 
+### Chunked baseline
+
+To measure what the tree adds, `--method chunked` runs a normal RAG pipeline
+with the same judge prompt, condition rules and verification
+([ADR 0008](docs/decisions/0008-chunked-baseline.md)):
+
+1. the policy is flattened and split into 1,000-character chunks with
+   150 characters of overlap, ignoring its sections,
+2. chunks are embedded with `nomic-embed-text` (set `LLM_EMBED_MODEL` to
+   change it) and the 8 most similar to the obligation are retrieved,
+3. the judge reads those chunks in one call (no "read more" round).
+
+```powershell
+regtrace check data\index\stridewell-fitness.json --method chunked
+```
+
+The report is saved as `data\results\<policy>.<pack>.chunked.json`, next to
+the tree report, so the two can be compared.
+
 <!-- RESULTS -->
 
 ## Development
@@ -346,6 +367,9 @@ These will be measured and expanded as the project matures:
 - Verification shows that a quote exists in the policy, not that it supports
   the verdict. A `not_addressed` finding has no quotes, so a section the
   navigator missed still gets `high` confidence.
+- The synthetic sample policies are short enough that the chunked baseline's
+  top 8 chunks cover the whole document, so on them it is effectively "whole
+  policy in context". Retrieval only differs on long real policies.
 - `--assume` answers are per obligation, so a shared fact (such as data from
   third parties) has to be given for each obligation that depends on it.
 - The `legal` strategy is tuned to the EUR-Lex layout. Other legal texts
@@ -356,6 +380,12 @@ These will be measured and expanded as the project matures:
 Newest first. Dates are YYYY-MM-DD.
 
 ### 2026-11-25
+- **Added:** chunked RAG baseline (`regtrace.baseline`): fixed-size
+  overlapping chunks, local embeddings through `OllamaClient.embed`, top-k
+  cosine retrieval and the same judge, selected with `check --method chunked`;
+  `LLM_EMBED_MODEL` setting and ADR 0008.
+- **Changed:** reports record the `method` used; the tree checker's
+  post-judgment steps are shared with the baseline.
 - **Added:** quote verification (`regtrace.verify`): five match grades,
   section correction, per-finding confidence and flags, the `verify` command
   for saved reports, and ADR 0007.

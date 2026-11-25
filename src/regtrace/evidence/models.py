@@ -68,6 +68,7 @@ class Report(BaseModel):
     policy_source: str
     pack_id: str
     model: str
+    method: str = "tree"
     created: str
     seconds: float = 0.0
     assumptions: dict[str, ConditionMet] = Field(default_factory=dict)

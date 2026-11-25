@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 DEFAULT_HOST = "http://localhost:11434"
 DEFAULT_MODEL = "qwen2.5:7b"
 DEFAULT_NUM_CTX = 8192
+DEFAULT_EMBED_MODEL = "nomic-embed-text"
 
 
 class Settings(BaseModel):
@@ -21,6 +22,7 @@ class Settings(BaseModel):
     llm_host: HttpUrl = Field(default=HttpUrl(DEFAULT_HOST))
     llm_model: str = Field(default=DEFAULT_MODEL, min_length=1)
     llm_num_ctx: int = Field(default=DEFAULT_NUM_CTX, gt=0)
+    llm_embed_model: str = Field(default=DEFAULT_EMBED_MODEL, min_length=1)
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:

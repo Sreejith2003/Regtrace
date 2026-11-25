@@ -5,7 +5,7 @@ from typer.testing import CliRunner
 from regtrace import __version__
 from regtrace.cli import app
 from regtrace.evidence import JudgeReply, Report, SectionChoice
-from regtrace.llm import LLMConnectionError
+from regtrace.llm import LLMConnectionError, LLMError
 from regtrace.tree import DocumentTree, Node, assign_ids
 
 runner = CliRunner()
@@ -335,6 +335,47 @@ def _check(tmp_path, *args, condition=None):
         ["check", str(policy), "-p", str(folder), "-r", str(regulation), "-o", str(out), *args],
     )
     return result, out
+
+
+class _EmbeddingCheckClient(_CheckClient):
+    embed_model = "fake-embed"
+
+    def embed(self, texts):
+        return [[1.0, float(len(t))] for t in texts]
+
+
+def test_check_chunked_baseline_saves_a_separate_report(tmp_path, monkeypatch):
+    monkeypatch.setattr("regtrace.cli.create_client", lambda model=None: _EmbeddingCheckClient())
+    monkeypatch.chdir(tmp_path)
+    folder = _write_pack(tmp_path / "pack")
+    regulation = _write_regulation(tmp_path / "gdpr.json")
+    policy = _write_policy(tmp_path / "acme.json")
+
+    result = runner.invoke(
+        app, ["check", str(policy), "-p", str(folder), "-r", str(regulation), "--method", "chunked"]
+    )
+
+    assert result.exit_code == 0
+    assert "chunked baseline" in result.output
+    assert "Embedding 1 chunks with fake-embed" in result.output
+    assert "(1 LLM calls" in result.output
+    report = Report.load(tmp_path / "data" / "results" / "acme.t.chunked.json")
+    assert report.method == "chunked"
+    assert report.findings[0].quotes[0].section_id == "1"
+
+
+def test_check_chunked_fails_cleanly_without_embedding_model(tmp_path, monkeypatch):
+    class Missing(_EmbeddingCheckClient):
+        def embed(self, texts):
+            raise LLMError("run `ollama pull fake-embed`")
+
+    monkeypatch.setattr("regtrace.cli.create_client", lambda model=None: Missing())
+
+    result, out = _check(tmp_path, "--method", "chunked")
+
+    assert result.exit_code == 1
+    assert "ollama pull fake-embed" in result.output
+    assert not out.exists()
 
 
 class _UnknownConditionClient(_CheckClient):

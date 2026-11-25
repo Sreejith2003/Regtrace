@@ -1,6 +1,7 @@
 """LLM access. All model calls in RegTrace go through this package."""
 
 from regtrace.llm.client import (
+    Embedder,
     LLMClient,
     LLMConnectionError,
     LLMError,
@@ -10,6 +11,7 @@ from regtrace.llm.client import (
 )
 
 __all__ = [
+    "Embedder",
     "LLMClient",
     "LLMConnectionError",
     "LLMError",

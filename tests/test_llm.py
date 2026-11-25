@@ -26,6 +26,13 @@ class FakeBackend:
             raise reply
         return SimpleNamespace(message=SimpleNamespace(content=reply))
 
+    def embed(self, **kwargs):
+        self.calls.append(kwargs)
+        reply = self.replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return SimpleNamespace(embeddings=reply)
+
 
 def make_client(replies, **kwargs):
     backend = FakeBackend(replies)
@@ -101,3 +108,36 @@ def test_missing_model_suggests_pull():
 def test_negative_max_retries_is_rejected():
     with pytest.raises(ValueError):
         OllamaClient(Settings(), max_retries=-1, backend=FakeBackend([]))
+
+
+def test_embed_uses_the_embedding_model():
+    client, backend = make_client([[[0.1, 0.2], [0.3, 0.4]]])
+
+    vectors = client.embed(["a", "b"])
+
+    assert vectors == [[0.1, 0.2], [0.3, 0.4]]
+    assert backend.calls == [{"model": "nomic-embed-text", "input": ["a", "b"]}]
+
+
+def test_embed_nothing_makes_no_call():
+    client, backend = make_client([])
+
+    assert client.embed([]) == []
+    assert backend.calls == []
+
+
+def test_embed_errors():
+    client, _ = make_client(
+        [
+            ConnectionError("refused"),
+            ollama.ResponseError("model not found", 404),
+            [[0.1]],
+        ]
+    )
+
+    with pytest.raises(LLMConnectionError):
+        client.embed(["a"])
+    with pytest.raises(LLMError, match="ollama pull nomic-embed-text"):
+        client.embed(["a"])
+    with pytest.raises(LLMResponseError, match="Expected 2 embeddings"):
+        client.embed(["a", "b"])

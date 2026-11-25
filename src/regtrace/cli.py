@@ -12,6 +12,7 @@ import typer
 from pydantic import BaseModel
 
 from regtrace import __version__
+from regtrace.baseline import ChunkIndex, check_policy_chunked, chunk_tree
 from regtrace.config import load_settings
 from regtrace.evidence import Report, Status, check_policy
 from regtrace.llm import LLMConnectionError, LLMError, create_client
@@ -58,6 +59,7 @@ def config() -> None:
     typer.echo(f"LLM host:     {settings.llm_host}")
     typer.echo(f"LLM model:    {settings.llm_model}")
     typer.echo(f"Context size: {settings.llm_num_ctx}")
+    typer.echo(f"Embeddings:   {settings.llm_embed_model}")
 
 
 class _Ping(BaseModel):
@@ -84,6 +86,11 @@ def llm_check() -> None:
     typer.secho("OK", fg=typer.colors.GREEN)
     typer.echo(f"Reply:   {result.reply}")
     typer.echo(f"Latency: {elapsed:.1f}s")
+
+
+class Method(StrEnum):
+    tree = "tree"
+    chunked = "chunked"
 
 
 class HeadingStrategy(StrEnum):
@@ -261,6 +268,9 @@ def check(
     assume: list[str] | None = typer.Option(
         None, "--assume", "-a", help="Answer a condition: ID=yes or ID=no (repeatable)."
     ),
+    method: Method = typer.Option(
+        Method.tree, help="tree: navigate sections; chunked: baseline top-k chunk retrieval."
+    ),
     model: str | None = typer.Option(None, "--model", "-m", help="Override LLM_MODEL."),
     out: Path | None = typer.Option(
         None, "--out", "-o", help="Report JSON (default: data/results/<policy>.<pack>.json)."
@@ -292,29 +302,30 @@ def check(
         raise typer.Exit(code=1) from exc
 
     client = create_client(model=model)
-    typer.echo(f"Checking {policy.title} against {pack.name} with {client.model} ...")
+    label = client.model if method == Method.tree else f"{client.model}, chunked baseline"
+    typer.echo(f"Checking {policy.title} against {pack.name} with {label} ...")
 
     def progress(done: int, total: int, item: LinkedObligation) -> None:
         typer.echo(f"  [{done}/{total}] {item.obligation.id}")
 
+    options = dict(regulation=regulation_tree, only=only, assume=answers, on_progress=progress)
     try:
-        report = check_policy(
-            policy,
-            links,
-            client,
-            regulation=regulation_tree,
-            only=only,
-            assume=answers,
-            on_progress=progress,
-        )
-    except LLMConnectionError as exc:
+        if method == Method.chunked:
+            chunks = chunk_tree(policy)
+            typer.echo(f"Embedding {len(chunks)} chunks with {client.embed_model} ...")
+            index = ChunkIndex.build(chunks, client)
+            report = check_policy_chunked(policy, links, client, index, **options)
+        else:
+            report = check_policy(policy, links, client, **options)
+    except LLMError as exc:
         typer.secho(f"FAILED: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc
 
     verify_report(report, policy)
     typer.echo("")
     print_matrix(report)
-    out = out or DEFAULT_RESULTS_DIR / f"{policy.doc_id}.{pack.id}.json"
+    suffix = "" if method == Method.tree else f".{method.value}"
+    out = out or DEFAULT_RESULTS_DIR / f"{policy.doc_id}.{pack.id}{suffix}.json"
     report.save(out)
     typer.echo("")
     typer.secho(f"Saved report to {out}", fg=typer.colors.GREEN)
