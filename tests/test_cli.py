@@ -200,7 +200,7 @@ def test_build_index_fails_cleanly_when_url_unreachable(tmp_path, monkeypatch):
     assert "FAILED" in result.output
 
 
-def _write_pack(folder, ref="13(1)(a)"):
+def _write_pack(folder, ref="13(1)(a)", condition=None):
     folder.mkdir()
     (folder / "pack.yaml").write_text(
         "id: t\nname: Test pack\nregulation: GDPR\nindex: gdpr.json\ndefinitions_article: '4'\n",
@@ -209,7 +209,8 @@ def _write_pack(folder, ref="13(1)(a)"):
     (folder / "obligations.yaml").write_text(
         "obligations:\n"
         f"  - id: t-identity\n    ref: '{ref}'\n    title: Identity\n    who: controller\n"
-        "    what: State who the controller is.\n    when: At collection.\n",
+        "    what: State who the controller is.\n    when: At collection.\n"
+        + (f"    condition: {condition}\n" if condition else ""),
         encoding="utf-8",
     )
     return folder
@@ -316,10 +317,117 @@ def test_check_prints_matrix_and_saves_report(tmp_path, monkeypatch):
 
     assert result.exit_code == 0
     assert "t-identity  13(1)(a)  compliant" in result.output
+    assert "compliant      high    1/1" in result.output
     assert "1 compliant  (2 LLM calls" in result.output
+    assert "Quotes verified: 1/1" in result.output
     report = Report.load(out)
     assert report.model == "fake-judge"
-    assert report.findings[0].quotes[0].text == "Acme Ltd."
+    assert report.findings[0].quotes[0].match == "exact"
+
+
+def _check(tmp_path, *args, condition=None):
+    folder = _write_pack(tmp_path / "pack", condition=condition)
+    regulation = _write_regulation(tmp_path / "gdpr.json")
+    policy = _write_policy(tmp_path / "acme.json")
+    out = tmp_path / "report.json"
+    result = runner.invoke(
+        app,
+        ["check", str(policy), "-p", str(folder), "-r", str(regulation), "-o", str(out), *args],
+    )
+    return result, out
+
+
+class _UnknownConditionClient(_CheckClient):
+    def generate_structured(self, prompt, schema, *, system=None):
+        if schema is SectionChoice:
+            return super().generate_structured(prompt, schema, system=system)
+        return JudgeReply(
+            quotes=[], condition_met="unknown", explanation="-", status="not_addressed", fix=""
+        )
+
+
+def test_check_lists_open_questions_for_depends(tmp_path, monkeypatch):
+    monkeypatch.setattr("regtrace.cli.create_client", lambda model=None: _UnknownConditionClient())
+
+    result, _ = _check(tmp_path, condition="A DPO exists.")
+
+    assert result.exit_code == 0
+    assert "depends" in result.output
+    assert "Open questions" in result.output
+    assert "t-identity: A DPO exists." in result.output
+
+
+def test_check_assume_no_marks_obligation_as_not_applying(tmp_path, monkeypatch):
+    monkeypatch.setattr("regtrace.cli.create_client", lambda model=None: _UnknownConditionClient())
+
+    result, out = _check(tmp_path, "--assume", "t-identity=no", condition="A DPO exists.")
+
+    assert result.exit_code == 0
+    assert "Open questions" not in result.output
+    report = Report.load(out)
+    assert report.assumptions == {"t-identity": "no"}
+    assert report.findings[0].llm_calls == 0
+
+
+def test_check_rejects_bad_assumptions(tmp_path, monkeypatch):
+    monkeypatch.setattr("regtrace.cli.create_client", lambda model=None: _CheckClient())
+
+    result, _ = _check(tmp_path, "--assume", "t-identity=maybe", condition="A DPO exists.")
+    assert result.exit_code == 1
+    assert "expected ID=yes or ID=no" in result.output
+
+
+def test_check_rejects_assumption_for_unconditional_obligation(tmp_path, monkeypatch):
+    monkeypatch.setattr("regtrace.cli.create_client", lambda model=None: _CheckClient())
+
+    result, _ = _check(tmp_path, "--assume", "t-identity=no")
+
+    assert result.exit_code == 1
+    assert "not a conditional obligation" in result.output
+
+
+def test_verify_rechecks_a_saved_report(tmp_path):
+    policy = _write_policy(tmp_path / "acme.json")
+    folder = _write_pack(tmp_path / "pack", condition="A DPO exists.")
+    report = Report(
+        policy_id="acme",
+        policy_title="Policy",
+        policy_source="p",
+        pack_id="t",
+        model="m",
+        created="now",
+        findings=[
+            {
+                "obligation_id": "t-identity",
+                "ref": "13(1)(a)",
+                "title": "Identity",
+                "status": "depends",
+                "sections_read": ["1"],
+                "quotes": [{"section_id": "1", "text": "Acme Group plc."}],
+            }
+        ],
+    )
+    path = tmp_path / "report.json"
+    report.save(path)
+
+    result = runner.invoke(app, ["verify", str(path), "--policy", str(policy), "-p", str(folder)])
+
+    assert result.exit_code == 0
+    assert "Quotes verified: 0/1" in result.output
+    assert "quote not found in the policy" in result.output
+    assert "t-identity: A DPO exists." in result.output
+    assert Report.load(path).findings[0].confidence == "low"
+
+
+def test_verify_fails_without_policy_index(tmp_path):
+    path = tmp_path / "report.json"
+    Report(
+        policy_id="missing", policy_title="", policy_source="", pack_id="t", model="m", created=""
+    ).save(path)
+
+    result = runner.invoke(app, ["verify", str(path), "--policy", str(tmp_path / "nope.json")])
+
+    assert result.exit_code == 1
 
 
 def test_check_rejects_unknown_obligation(tmp_path, monkeypatch):
