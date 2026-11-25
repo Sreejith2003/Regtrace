@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from enum import StrEnum
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -15,9 +16,29 @@ class Status(StrEnum):
     depends = "depends"
 
 
+class Match(StrEnum):
+    exact = "exact"
+    normalized = "normalized"
+    spliced = "spliced"
+    fuzzy = "fuzzy"
+    not_found = "not_found"
+
+
+VERIFIED = (Match.exact, Match.normalized, Match.spliced)
+
+Confidence = Literal["high", "medium", "low"]
+ConditionMet = Literal["yes", "no", "unknown"]
+
+
 class Quote(BaseModel):
     section_id: str
     text: str
+    match: Match | None = None
+    source_text: str = ""
+
+    @property
+    def verified(self) -> bool:
+        return self.match in VERIFIED
 
 
 class Finding(BaseModel):
@@ -25,11 +46,17 @@ class Finding(BaseModel):
     ref: str
     title: str
     status: Status | None = None
+    judged_status: Status | None = None
+    condition: str | None = None
+    condition_met: ConditionMet | None = None
+    assumed: bool = False
     quotes: list[Quote] = Field(default_factory=list)
     explanation: str = ""
     fix: str = ""
     sections_read: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    confidence: Confidence | None = None
+    flags: list[str] = Field(default_factory=list)
     error: str | None = None
     llm_calls: int = 0
     seconds: float = 0.0
@@ -43,11 +70,16 @@ class Report(BaseModel):
     model: str
     created: str
     seconds: float = 0.0
+    assumptions: dict[str, ConditionMet] = Field(default_factory=dict)
     findings: list[Finding] = Field(default_factory=list)
 
     def counts(self) -> dict[str, int]:
         counter = Counter(f.status.value if f.status else "error" for f in self.findings)
         return dict(counter)
+
+    def quote_counts(self) -> tuple[int, int]:
+        quotes = [q for f in self.findings for q in f.quotes]
+        return sum(q.verified for q in quotes), len(quotes)
 
     def save(self, path: str | Path) -> None:
         path = Path(path)
